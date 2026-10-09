@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Dados, pesos e resultados ficam fora do git
+data/
+checkpoints/
+runs/
+outputs/
+*.pt
+*.pth
+*.ckpt
+*.tif
+*.tiff
+
+# Editor e sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
