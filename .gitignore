@@ -21,3 +21,6 @@ outputs/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Figuras e resultados gerados pelos scripts
+saidas/

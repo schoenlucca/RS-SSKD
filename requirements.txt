@@ -1,3 +1,14 @@
+# Rede neural (aluno)
 torch>=2.1
 torchvision>=0.16
+
+# Professor TEBAKA e leitura das imagens
+numpy
+scipy
+scikit-image
+opencv-python
+rasterio
+
+# Figuras e testes
+matplotlib
 pytest>=7
