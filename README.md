@@ -23,6 +23,7 @@ PIBIC 2026, Plano de Trabalho 1.2 (UnB, orientador Prof. Díbio Borges).
 | Caminho | Conteúdo | Situação |
 | --- | --- | --- |
 | `rsskd/teacher.py` | Professor TEBAKA | Pronto |
+| `rsskd/data.py` | Leitura do conjunto de teste (AgML) e métricas por copa | Pronto |
 | `rsskd/model.py` | ResNet com 5 canais e CAM | Será adaptado para Mask R-CNN |
 | `rsskd/losses.py` | Consistência e auto-destilação | Será adaptado para máscaras |
 | `scripts/` | Scripts de execução e visualização | Em construção |

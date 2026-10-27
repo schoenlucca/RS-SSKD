@@ -9,6 +9,12 @@ scikit-image
 opencv-python
 rasterio
 
+# Conjunto de teste do Hugging Face (Parquet)
+pandas
+pyarrow
+pillow
+huggingface_hub
+
 # Figuras e testes
 matplotlib
 pytest>=7
