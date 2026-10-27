@@ -80,3 +80,13 @@ def test_alvos_mask_rcnn_e_mediana():
     assert (t["boxes"][:, 2] > t["boxes"][:, 0]).all()
     # Copas com raio 20 a 25: área entre ~1250 e ~2000 pixels.
     assert 1000 < median_crown_area([inst]) < 2200
+
+
+def test_limiar_otsu():
+    # Somar 0,3 ao vermelho derruba o NDVI de tudo (as copas caem para perto
+    # de 0,2), como acontece com bandas sem calibração. O limiar fixo de 0,4
+    # não acharia nada; o limiar automático (Otsu) se adapta e acha as copas.
+    img, n = synthetic_image()
+    img[..., RED] = img[..., RED] + 0.3
+    out = TebakaTeacher(nir_band=NIR, red_band=RED, th1="otsu", th2="otsu")(img)
+    assert out["n_crowns"] == n

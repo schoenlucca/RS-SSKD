@@ -32,6 +32,24 @@ PIBIC 2026, Plano de Trabalho 1.2 (UnB, orientador Prof. Díbio Borges).
 O código da fase de classificação few-shot (protótipos e episódios) saiu do
 projeto e está no histórico do git: `git show b06a16f:rsskd/fewshot.py`.
 
+## Resultados do professor TEBAKA (conjunto AgML)
+
+Conjunto de teste de Peng et al. (2026), plantação de *Camellia oleifera*,
+5 bandas em 8 bits: 0, 1 e 2 = vermelho, verde e azul (iguais ao RGB pronto);
+3 = NIR (pela razão copa/fundo e pela baixa correlação com o vermelho);
+4 = provavelmente Red-Edge. O NDVI usa as bandas 3 e 0. Como as bandas não
+estão em reflectância, o NDVI fica quase todo negativo.
+
+Parâmetros calibrados na validação (busca em grade): limiar -0,42,
+distância mínima 18 px, área mínima 300 px.
+
+| Divisão | Precisão | Revocação | F1 | IoU por copa | IoU por pixel | Erro de contagem |
+| --- | --- | --- | --- | --- | --- | --- |
+| Validação (59 imagens) | 0,52 | 0,47 | 0,49 | 0,65 | 0,59 | 3,5 |
+| Teste (60 imagens) | 0,53 | 0,50 | 0,52 | 0,65 | 0,56 | 3,6 |
+
+Reproduzir: `python scripts/evaluate_teacher.py --split test`.
+
 ## Instalação e testes
 
 ```

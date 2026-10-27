@@ -32,6 +32,7 @@ import cv2
 import numpy as np
 from scipy import ndimage as ndi
 from skimage.feature import peak_local_max
+from skimage.filters import threshold_otsu
 from skimage.segmentation import watershed
 
 
@@ -72,8 +73,8 @@ def _dilate(mask: np.ndarray, size: int) -> np.ndarray:
 # --------------------------------------------------------------------------
 def vegetation_mask(
     ndvi: np.ndarray,
-    th1: float = 0.4,
-    th2: float = 0.4,
+    th1: float | str = 0.4,
+    th2: float | str = 0.4,
     nlm_h: float = 10.0,
     nlm_template: int = 7,
     nlm_search: int = 21,
@@ -90,7 +91,17 @@ def vegetation_mask(
     ruído é aplicada aos valores de NDVI dentro da máscara do primeiro
     limiar (convertidos para 0-255, formato exigido pelo OpenCV), e o
     segundo limiar é aplicado ao resultado.
+
+    th1 e th2 também aceitam "otsu": o limiar é escolhido automaticamente em
+    cada imagem pelo método de Otsu (o valor que melhor separa os pixels em
+    dois grupos). Útil quando o NDVI não está calibrado (bandas em 8 bits,
+    sem reflectância) e os valores mudam de uma imagem para outra.
     """
+    if th1 == "otsu" or th2 == "otsu":
+        otsu = float(threshold_otsu(ndvi))
+        th1 = otsu if th1 == "otsu" else th1
+        th2 = otsu if th2 == "otsu" else th2
+
     # Passo 2: limiar th1, depois abertura (erosão seguida de dilatação) 5x5.
     m = (ndvi > th1).astype(np.uint8)
     m = _dilate(_erode(m, 5), 5)
@@ -187,8 +198,8 @@ class TebakaTeacher:
 
     nir_band: int = 3
     red_band: int = 1
-    th1: float = 0.4
-    th2: float = 0.4
+    th1: float | str = 0.4
+    th2: float | str = 0.4
     nlm_h: float = 10.0
     nlm_template: int = 7
     nlm_search: int = 21
