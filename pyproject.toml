@@ -1,0 +1,12 @@
+# Configurações das ferramentas do projeto.
+
+[tool.pytest.ini_options]
+# Pastas onde o pytest procura módulos ao importar (além da raiz).
+# Permite que os testes importem os scripts e os auxiliares de outros testes.
+pythonpath = [".", "scripts", "tests"]
+testpaths = ["tests"]
+
+[tool.pyright]
+# O mesmo para o editor (Pylance, no VS Code): sem isto, ele sublinha os
+# imports de scripts/ e tests/ como "não encontrados", embora funcionem.
+extraPaths = ["scripts", "tests"]
