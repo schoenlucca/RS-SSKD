@@ -46,3 +46,36 @@ def test_recusa_professor_diferente(tmp_path):
     PseudoLabelStore(tmp_path, t)                      # mesmo professor: ok
     with pytest.raises(ValueError, match="th1"):
         PseudoLabelStore(tmp_path, replace(t, th1=-0.30))
+
+
+def test_script_de_geracao(tmp_path):
+    # Usa o arquivo Parquet falso dos testes do carregador.
+    pytest.importorskip("pyarrow")
+    pd = pytest.importorskip("pandas")
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from generate_pseudolabels import generate
+    from test_data import _fake_row
+
+    dados = tmp_path / "dados"
+    dados.mkdir()
+    rows = [_fake_row(i, s) for i, s in enumerate(["train"] * 3 + ["val"] * 2)]
+    pd.DataFrame(rows).to_parquet(dados / "train-00000.parquet")
+
+    # Professor com os índices de banda do arquivo falso (NIR 4, vermelho 2).
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(json.dumps({"professor": {
+        "nir_band": 4, "red_band": 2, "th1": 0.2, "th2": 0.2,
+        "min_distance": 5, "min_area": 30}}), encoding="utf-8")
+
+    saida = tmp_path / "pseudo"
+    msgs = []
+    assert generate(dados, saida, cfg, ["train", "val"], log=msgs.append) == {
+        "train": 3, "val": 2}
+    store = PseudoLabelStore(saida)
+    assert store.indices("train") == [0, 1, 2]
+    assert store.load("val", 1).max() == 2          # as 2 copas do arquivo falso
+
+    # Rodar de novo não refaz nada: as imagens já geradas são puladas.
+    assert generate(dados, saida, cfg, ["train", "val"], log=msgs.append) == {
+        "train": 0, "val": 0}
