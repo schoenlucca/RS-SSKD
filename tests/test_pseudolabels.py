@@ -79,3 +79,16 @@ def test_script_de_geracao(tmp_path):
     # Rodar de novo não refaz nada: as imagens já geradas são puladas.
     assert generate(dados, saida, cfg, ["train", "val"], log=msgs.append) == {
         "train": 0, "val": 0}
+
+
+def test_resumo_das_copas():
+    from rsskd.pseudolabels import summarize_instances
+
+    vazia = np.zeros((64, 64), np.int32)
+    r = summarize_instances([_copas(), vazia])
+    assert r["imagens"] == 2 and r["copas"] == 2
+    assert r["imagens_sem_copa"] == 1
+    assert r["copas_por_imagem"]["maximo"] == 2
+    # Áreas das duas copas: 15x15 = 225 e 20x25 = 500 pixels.
+    assert r["area_px"]["mediana"] == pytest.approx((225 + 500) / 2)
+    assert r["cobertura"] == pytest.approx((725 / 4096) / 2)

@@ -123,3 +123,46 @@ class PseudoLabelStore:
         if not folder.exists():
             return []
         return sorted(int(p.stem) for p in folder.glob("*.npz"))
+
+
+# --------------------------------------------------------------------------
+# Resumo das copas
+# --------------------------------------------------------------------------
+def summarize_instances(labels_list) -> dict:
+    """Estatísticas de uma lista de imagens de copas (0 = fundo, 1..N).
+
+    Serve tanto para as copas do professor quanto para as da referência,
+    para comparar as duas. Retorna:
+        imagens, copas:          totais;
+        copas_por_imagem:        média, mediana, mínimo e máximo;
+        imagens_sem_copa:        quantas imagens ficaram sem nenhuma copa;
+        area_px:                 percentis 10, 50 (mediana) e 90 da área das
+                                 copas, em pixels;
+        cobertura:               fração média da imagem coberta por copas.
+    """
+    counts, areas, coverage = [], [], []
+    for labels in labels_list:
+        ids, sizes = np.unique(labels[labels > 0], return_counts=True)
+        counts.append(len(ids))
+        areas.extend(sizes.tolist())
+        coverage.append(float((labels > 0).mean()))
+    counts = np.array(counts)
+    areas = np.array(areas) if areas else np.zeros(1)
+    return {
+        "imagens": int(len(counts)),
+        "copas": int(counts.sum()),
+        "copas_por_imagem": {"media": float(counts.mean()),
+                             "mediana": float(np.median(counts)),
+                             "minimo": int(counts.min()),
+                             "maximo": int(counts.max())},
+        "imagens_sem_copa": int((counts == 0).sum()),
+        "area_px": {"p10": float(np.percentile(areas, 10)),
+                    "mediana": float(np.median(areas)),
+                    "p90": float(np.percentile(areas, 90))},
+        "cobertura": float(np.mean(coverage)),
+    }
+
+
+def summarize_store(store: PseudoLabelStore, split: str) -> dict:
+    """Resumo das copas do professor gravadas numa divisão."""
+    return summarize_instances(store.load(split, i) for i in store.indices(split))
