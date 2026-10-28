@@ -1,0 +1,24 @@
+{
+  "_comentario": "Professor TEBAKA calibrado no conjunto AgML (Peng et al., 2026). Calibração: busca em grade na divisão de validação, maximizando o F1 por copa (scripts/evaluate_teacher.py --split val --grade).",
+  "conjunto": "Project-AgML/tree_crown_segmentation",
+  "bandas": {
+    "_comentario": "Índices das bandas no arquivo. 0 a 2 são iguais ao RGB pronto; 3 tem a maior razão copa/fundo (NIR); 4 é provavelmente o Red-Edge.",
+    "vermelho": 0,
+    "verde": 1,
+    "azul": 2,
+    "nir": 3,
+    "red_edge": 4
+  },
+  "professor": {
+    "_comentario": "Parâmetros do TebakaTeacher. Os limiares são negativos porque as bandas estão em 8 bits, sem reflectância, e o NDVI fica deslocado.",
+    "nir_band": 3,
+    "red_band": 0,
+    "th1": -0.42,
+    "th2": -0.42,
+    "nlm_h": 10.0,
+    "nlm_template": 7,
+    "nlm_search": 21,
+    "min_distance": 18,
+    "min_area": 300
+  }
+}

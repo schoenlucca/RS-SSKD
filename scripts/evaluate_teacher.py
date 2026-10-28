@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import matplotlib
@@ -41,18 +42,13 @@ from rsskd.data import (  # noqa: E402
 )
 from rsskd.teacher import TebakaTeacher  # noqa: E402
 
-# Parâmetros calibrados na validação (ver o README). As bandas deste conjunto
-# não estão em reflectância, e o vermelho vem da câmera RGB, por isso o NDVI
-# fica quase todo negativo e os limiares também.
-NIR_BAND, RED_BAND = 3, 0
-BEST = {"th": -0.42, "min_distance": 18, "min_area": 300}
+# Os parâmetros calibrados do professor ficam neste arquivo, lido também
+# pelos outros scripts. Para mudar um parâmetro, mude só lá.
+DEFAULT_CONFIG = Path("configs/agml_teacher.json")
 
 
-def evaluate(samples, refs, th, min_distance, min_area):
+def evaluate(samples, refs, teacher):
     """Roda o professor em todas as amostras e soma as métricas."""
-    teacher = TebakaTeacher(nir_band=NIR_BAND, red_band=RED_BAND,
-                            th1=th, th2=th, min_distance=min_distance,
-                            min_area=min_area)
     rows, outputs = [], []
     tp = fp = fn = 0
     for s, ref in zip(samples, refs):
@@ -114,6 +110,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--split", default="test", choices=["train", "val", "test"])
     ap.add_argument("--pasta", default=str(DEFAULT_DIR))
+    ap.add_argument("--config", default=str(DEFAULT_CONFIG))
     ap.add_argument("--grade", action="store_true",
                     help="busca em grade dos parâmetros (use com --split val)")
     args = ap.parse_args()
@@ -124,20 +121,25 @@ def main():
     print(f"{len(samples)} imagens ({args.split}), "
           f"{sum(r.max() for r in refs)} copas na referência")
 
+    base = TebakaTeacher.from_config(args.config)
+
     if args.grade:
+        # Parte dos parâmetros do arquivo e varia só os três principais.
         results = []
         for th, md, ma in itertools.product([-0.5, -0.45, -0.42, -0.38, -0.3, "otsu"],
                                             [12, 18, 25], [150, 300]):
-            summ, _, _ = evaluate(samples, refs, th, md, ma)
+            teacher = replace(base, th1=th, th2=th, min_distance=md, min_area=ma)
+            summ, _, _ = evaluate(samples, refs, teacher)
             results.append((summ["f1"], th, md, ma))
             print(f"th={th} min_distance={md} min_area={ma}: {fmt(summ)}", flush=True)
         f1, th, md, ma = max(results, key=lambda r: r[0])
         print(f"\nMelhor F1 = {f1:.2f} com th={th}, min_distance={md}, min_area={ma}")
         return
 
-    summary, rows, outputs = evaluate(samples, refs, BEST["th"],
-                                      BEST["min_distance"], BEST["min_area"])
-    print(f"Parâmetros: {BEST}")
+    summary, rows, outputs = evaluate(samples, refs, base)
+    print(f"Parâmetros ({args.config}): th1={base.th1}, th2={base.th2}, "
+          f"min_distance={base.min_distance}, min_area={base.min_area}, "
+          f"NIR=banda {base.nir_band}, vermelho=banda {base.red_band}")
     print(fmt(summary))
 
     out_dir = Path("saidas")

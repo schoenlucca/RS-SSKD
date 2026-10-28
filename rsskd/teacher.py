@@ -26,7 +26,9 @@ Este arquivo usa só NumPy, SciPy, scikit-image e OpenCV (sem PyTorch).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass, field, fields
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -208,6 +210,23 @@ class TebakaTeacher:
     channels_first: bool | None = None  # None = detectar automaticamente
     extra: dict = field(default_factory=dict)
 
+    @classmethod
+    def from_config(cls, path: str | Path) -> "TebakaTeacher":
+        """Cria o professor a partir de um arquivo de configuração JSON.
+
+        Lê a seção "professor" do arquivo (ver configs/agml_teacher.json).
+        Chaves que começam com "_" são comentários e são ignoradas. Chaves
+        desconhecidas geram erro, para um erro de digitação não passar
+        despercebido.
+        """
+        cfg = load_config(path)["professor"]
+        params = {k: v for k, v in cfg.items() if not k.startswith("_")}
+        valid = {f.name for f in fields(cls)}
+        unknown = set(params) - valid
+        if unknown:
+            raise KeyError(f"Parâmetros desconhecidos no arquivo: {sorted(unknown)}")
+        return cls(**params)
+
     def _bands(self, image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         cf = self.channels_first
         if cf is None:
@@ -229,6 +248,16 @@ class TebakaTeacher:
             "instances": inst,
             "n_crowns": int(inst.max()),
         }
+
+
+
+# --------------------------------------------------------------------------
+# Configuração
+# --------------------------------------------------------------------------
+def load_config(path: str | Path) -> dict:
+    """Lê um arquivo de configuração JSON (ex.: configs/agml_teacher.json)."""
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 # --------------------------------------------------------------------------

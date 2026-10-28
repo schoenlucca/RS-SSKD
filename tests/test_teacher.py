@@ -90,3 +90,20 @@ def test_limiar_otsu():
     img[..., RED] = img[..., RED] + 0.3
     out = TebakaTeacher(nir_band=NIR, red_band=RED, th1="otsu", th2="otsu")(img)
     assert out["n_crowns"] == n
+
+
+def test_configuracao_do_professor(tmp_path):
+    import json
+
+    import pytest
+
+    # O arquivo do repositório cria o professor com os parâmetros calibrados.
+    cfg = Path(__file__).resolve().parents[1] / "configs" / "agml_teacher.json"
+    t = TebakaTeacher.from_config(cfg)
+    assert (t.nir_band, t.red_band, t.min_distance) == (3, 0, 18)
+
+    # Um parâmetro com erro de digitação tem de gerar erro, e não ser ignorado.
+    ruim = tmp_path / "ruim.json"
+    ruim.write_text(json.dumps({"professor": {"nir_bnad": 3}}), encoding="utf-8")
+    with pytest.raises(KeyError):
+        TebakaTeacher.from_config(ruim)
