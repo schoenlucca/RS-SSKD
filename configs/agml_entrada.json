@@ -1,0 +1,30 @@
+{
+  "_comentario": "Normalização da entrada do aluno: média e desvio de cada canal nas 476 imagens de treino do AgML. Gerado por scripts/compute_input_stats.py.",
+  "nir_band": 3,
+  "red_band": 0,
+  "add_ndvi": true,
+  "channels": [
+    "vermelho",
+    "verde",
+    "azul",
+    "nir",
+    "red_edge",
+    "ndvi"
+  ],
+  "mean": [
+    105.22187,
+    104.105233,
+    77.046012,
+    47.195061,
+    37.204971,
+    -0.35046
+  ],
+  "std": [
+    51.214123,
+    41.156541,
+    33.313434,
+    19.651956,
+    17.434433,
+    0.227126
+  ]
+}

@@ -6,6 +6,8 @@ Módulos:
     losses:  consistência sob transformações e auto-destilação do RS-SSKD.
     teacher: professor TEBAKA (NDVI -> máscara -> copas). Importe direto:
              from rsskd.teacher import TebakaTeacher
+    inputs:  entrada do aluno (5 bandas + NDVI, normalizadas). Importe direto:
+             from rsskd.inputs import InputSpec
 """
 
 from .losses import base_loss, cam_consistency, distill_loss, make_teacher, t_flip, t_scale
