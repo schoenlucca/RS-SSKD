@@ -44,8 +44,11 @@ class RSSSKDNet(nn.Module):
         comeca com a media dos filtros RGB, para nao perder o pre-treino.
         """
         new = nn.Conv2d(
-            in_channels, conv.out_channels, conv.kernel_size,
-            conv.stride, conv.padding, bias=False,
+            in_channels, conv.out_channels,
+            kernel_size=conv.kernel_size,  # type: ignore[arg-type]
+            stride=conv.stride,  # type: ignore[arg-type]
+            padding=conv.padding,  # type: ignore[arg-type]
+            bias=False,
         )
         if pretrained:
             with torch.no_grad():

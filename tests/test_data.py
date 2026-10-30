@@ -63,7 +63,7 @@ def test_carrega_e_filtra_por_divisao(pasta):
     s = ds[0]
     assert s.bands.shape == (5, H, W) and s.bands.dtype == np.uint8
     assert s.mask.shape == (H, W) and set(np.unique(s.mask)) == {0, 1}
-    assert s.rgb.shape == (H, W, 3)
+    assert s.rgb is not None and s.rgb.shape == (H, W, 3)
     assert s.metadata["crs"] == "EPSG:4326"
 
 

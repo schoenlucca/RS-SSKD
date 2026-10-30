@@ -99,7 +99,8 @@ def decode_array(value, shape=None, dtype=None) -> np.ndarray:
         arr = np.frombuffer(data, dtype=np.dtype(dtype or "uint8"))
         return arr.reshape(tuple(shape))
 
-    arr = np.asarray(value if not hasattr(value, "tolist") else value.tolist())
+    tolist = getattr(value, "tolist", None)        # arrays do pandas/pyarrow
+    arr = np.asarray(tolist() if callable(tolist) else value)
     if arr.dtype == object:  # listas aninhadas de comprimento variável
         arr = np.stack([np.asarray(v) for v in value])
     if shape is not None and arr.size == int(np.prod(shape)):
@@ -124,8 +125,8 @@ def mask_to_instances(mask: np.ndarray) -> np.ndarray:
     desconectada é tratada como uma árvore. Copas encostadas na referência
     viram uma só; isso deve ser lembrado na avaliação.
     """
-    labels, _ = ndi.label(mask_to_binary(mask))
-    return labels.astype(np.int32)
+    labels = ndi.label(mask_to_binary(mask))[0]  # type: ignore[index]
+    return np.asarray(labels, np.int32)
 
 
 # --------------------------------------------------------------------------
@@ -146,7 +147,7 @@ class AgmlTreeCrowns:
 
     Uso:
         ds = AgmlTreeCrowns(split="train")
-        amostra =y ds[0]
+        amostra = ds[0]
         amostra.bands.shape   # (5, 256, 256)
         amostra.mask.shape    # (256, 256)
     """

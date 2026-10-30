@@ -55,7 +55,8 @@ def main():
     ds = AgmlTreeCrowns(args.pasta)
     print(f"\nTotal de amostras: {len(ds)}")
     if "split" in ds.df.columns:
-        print(ds.df["split"].value_counts().to_string())
+        import pandas as pd
+        print(pd.Series(ds.df["split"]).value_counts().to_string())
 
     # 3. Primeira amostra.
     s = ds[0]
@@ -78,7 +79,8 @@ def main():
 
     # 5. Figura das bandas.
     n = s.bands.shape[0]
-    fig, ax = plt.subplots(1, n + 1, figsize=(3.2 * (n + 1), 3.4))
+    fig, ax = plt.subplots(1, n + 1, figsize=(3.2 * (n + 1), 3.4), squeeze=False)
+    ax = ax[0]                       # uma linha de painéis
     for c in range(n):
         ax[c].imshow(s.bands[c], cmap="gray")
         ax[c].set_title(f"banda {c} (razão {ratios[c]:.2f})")

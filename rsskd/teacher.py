@@ -99,10 +99,9 @@ def vegetation_mask(
     dois grupos). Útil quando o NDVI não está calibrado (bandas em 8 bits,
     sem reflectância) e os valores mudam de uma imagem para outra.
     """
-    if th1 == "otsu" or th2 == "otsu":
-        otsu = float(threshold_otsu(ndvi))
-        th1 = otsu if th1 == "otsu" else th1
-        th2 = otsu if th2 == "otsu" else th2
+    otsu = float(threshold_otsu(ndvi)) if "otsu" in (th1, th2) else 0.0
+    th1 = otsu if th1 == "otsu" else float(th1)
+    th2 = otsu if th2 == "otsu" else float(th2)
 
     # Passo 2: limiar th1, depois abertura (erosão seguida de dilatação) 5x5.
     m = (ndvi > th1).astype(np.uint8)
@@ -147,20 +146,21 @@ def split_crowns(
     """
     mask = mask.astype(bool)
     # Remove manchas pequenas antes de procurar os centros.
-    comps, _ = ndi.label(mask)
+    comps = ndi.label(mask)[0]  # type: ignore[index]
     mask = _remove_small_labels(comps, min_area) > 0
     if not mask.any():
         return np.zeros(mask.shape, np.int32)
 
-    dist = ndi.distance_transform_edt(mask)
+    dist = np.asarray(ndi.distance_transform_edt(mask))
 
     # Picos da distância = prováveis centros de copa.
     # labels= garante pelo menos um pico por mancha desconectada.
-    comps, _ = ndi.label(mask)
+    comps = ndi.label(mask)[0]  # type: ignore[index]
     peaks = peak_local_max(dist, min_distance=min_distance, labels=comps,
                            exclude_border=False)
     markers = np.zeros(mask.shape, np.int32)
-    markers[tuple(peaks.T)] = np.arange(1, len(peaks) + 1)
+    peaks = np.asarray(peaks, np.intp)            # (n_picos, 2): linha, coluna
+    markers[peaks[:, 0], peaks[:, 1]] = np.arange(1, len(peaks) + 1)
 
     # Watershed sobre -distância: os centros são os "fundos" dos vales.
     labels = watershed(-dist, markers, mask=mask)

@@ -30,7 +30,7 @@ from rsskd.teacher import TebakaTeacher  # noqa: E402
 def read_image(path: str) -> np.ndarray:
     """Lê um GeoTIFF multibanda e devolve (H, W, C) em float32."""
     try:
-        import rasterio
+        import rasterio  # type: ignore[import-not-found]  # opcional
     except ImportError:
         try:
             import tifffile
@@ -94,7 +94,8 @@ def main():
     colors = np.random.default_rng(0).random((inst.max() + 1, 3))
     colors[0] = 0
     fig, ax = plt.subplots(1, 4, figsize=(16, 4.5))
-    ax[0].imshow(rgb_preview(img, tuple(rgb)))
+    r, g, b = rgb
+    ax[0].imshow(rgb_preview(img, (r, g, b)))
     ax[0].set_title("Imagem (composição)")
     im = ax[1].imshow(out["ndvi"], cmap="RdYlGn", vmin=-1, vmax=1)
     ax[1].set_title("NDVI")
