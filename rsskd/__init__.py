@@ -8,6 +8,8 @@ Módulos:
              from rsskd.teacher import TebakaTeacher
     inputs:  entrada do aluno (5 bandas + NDVI, normalizadas). Importe direto:
              from rsskd.inputs import InputSpec
+    dataset: imagens + copas do professor no formato do Mask R-CNN:
+             from rsskd.dataset import CrownDataset
 """
 
 from .losses import base_loss, cam_consistency, distill_loss, make_teacher, t_flip, t_scale
