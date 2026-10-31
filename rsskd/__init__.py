@@ -10,6 +10,8 @@ Módulos:
              from rsskd.inputs import InputSpec
     dataset: imagens + copas do professor no formato do Mask R-CNN:
              from rsskd.dataset import CrownDataset
+    augment: rotações/espelhamentos (aumento e consistência) e lotes:
+             from rsskd.augment import RandomDihedral, make_loader
 """
 
 from .losses import base_loss, cam_consistency, distill_loss, make_teacher, t_flip, t_scale
