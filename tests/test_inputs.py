@@ -60,3 +60,10 @@ def test_arquivo_do_repositorio():
     spec = InputSpec.load(cfg)
     assert spec.in_channels == 6 and spec.channels[-1] == "ndvi"
     assert all(s > 0 for s in spec.std)
+
+
+def test_desnormalizar_devolve_os_valores_originais():
+    imgs = _imagens()
+    spec = compute_input_spec(imgs, NIR, RED, ["b0", "b1", "b2", "b3", "b4", "ndvi"])
+    x = build_input(imgs[0], NIR, RED)
+    assert np.allclose(spec.denormalize(spec(imgs[0])), x, atol=1e-3)

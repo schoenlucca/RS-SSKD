@@ -126,6 +126,16 @@ class InputSpec:
         std = np.maximum(np.asarray(self.std, np.float32), 1e-6)[:, None, None]
         return (x - mean) / std
 
+    def denormalize(self, x: np.ndarray) -> np.ndarray:
+        """Desfaz a normalização: x_c = x_c' * desvio_c + media_c.
+
+        Serve para desenhar a entrada do aluno com as cores originais
+        (scripts/show_batch.py). x: (C, H, W), já normalizada.
+        """
+        mean = np.asarray(self.mean, np.float32)[:, None, None]
+        std = np.maximum(np.asarray(self.std, np.float32), 1e-6)[:, None, None]
+        return x * std + mean
+
     def save(self, path: str | Path, comment: str = "") -> None:
         info = {"_comentario": comment} if comment else {}
         info.update(asdict(self))

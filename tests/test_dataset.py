@@ -92,3 +92,15 @@ def test_erro_se_faltam_copas(pastas, tmp_path):
     dados, _, spec = pastas
     with pytest.raises(FileNotFoundError, match="sem copas"):
         CrownDataset("train", tmp_path / "vazia", spec, dataset_dir=dados)
+
+
+def test_script_que_desenha_o_lote(pastas, tmp_path):
+    pytest.importorskip("matplotlib")
+    from show_batch import main
+
+    dados, pseudo, spec = pastas
+    spec.save(tmp_path / "entrada.json")
+    saida = tmp_path / "lote.png"
+    main(["--pasta", str(dados), "--copas", str(pseudo), "--entrada",
+          str(tmp_path / "entrada.json"), "--n", "2", "--saida", str(saida)])
+    assert saida.exists() and saida.stat().st_size > 10_000
