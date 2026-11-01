@@ -37,9 +37,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from rsskd.data import (  # noqa: E402
-    DEFAULT_DIR, AgmlTreeCrowns, iou_binary, mask_to_instances, match_instances,
-)
+from rsskd.data import DEFAULT_DIR, AgmlTreeCrowns, mask_to_instances  # noqa: E402
+from rsskd.evaluation import CrownMetrics, format_summary  # noqa: E402
 from rsskd.teacher import TebakaTeacher  # noqa: E402
 
 # Os parâmetros calibrados do professor ficam neste arquivo, lido também
@@ -48,40 +47,20 @@ DEFAULT_CONFIG = Path("configs/agml_teacher.json")
 
 
 def evaluate(samples, refs, teacher):
-    """Roda o professor em todas as amostras e soma as métricas."""
-    rows, outputs = [], []
-    tp = fp = fn = 0
+    """Roda o professor em todas as amostras e soma as métricas.
+
+    As métricas vêm de rsskd/evaluation.py, as mesmas usadas no aluno.
+    """
+    metrics, outputs = CrownMetrics(), []
     for s, ref in zip(samples, refs):
         out = teacher(s.bands)
-        m = match_instances(out["instances"], ref)
-        tp, fp, fn = tp + m["tp"], fp + m["fp"], fn + m["fn"]
-        rows.append({"indice": s.index, "n_ref": m["n_ref"], "n_pred": m["n_pred"],
-                     "tp": m["tp"], "fp": m["fp"], "fn": m["fn"],
-                     "iou_copa": m["mean_iou"],
-                     "iou_pixel": iou_binary(out["vegetation"], s.mask)})
+        metrics.add(out["instances"], ref, index=s.index,
+                    pred_mask=out["vegetation"])
         outputs.append(out)
-
-    # As métricas por copa somam acertos e erros de todas as imagens antes
-    # de dividir (média "micro"), para imagens com poucas copas não pesarem
-    # tanto quanto imagens com muitas.
-    prec = tp / (tp + fp) if tp + fp else 0.0
-    rec = tp / (tp + fn) if tp + fn else 0.0
-    f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
-    matched = [r["iou_copa"] for r in rows if r["tp"]]
-    summary = {
-        "precisao": prec, "revocacao": rec, "f1": f1,
-        "iou_copa": float(np.mean(matched)) if matched else 0.0,
-        "iou_pixel": float(np.mean([r["iou_pixel"] for r in rows])),
-        "erro_contagem": float(np.mean([abs(r["n_pred"] - r["n_ref"]) for r in rows])),
-    }
-    return summary, rows, outputs
+    return metrics.summary(), metrics.rows, outputs
 
 
-def fmt(summary):
-    return (f"P={summary['precisao']:.2f} R={summary['revocacao']:.2f} "
-            f"F1={summary['f1']:.2f} IoU_copa={summary['iou_copa']:.2f} "
-            f"IoU_pixel={summary['iou_pixel']:.2f} "
-            f"erro_contagem={summary['erro_contagem']:.1f}")
+fmt = format_summary
 
 
 def figure(samples, refs, outputs, path, n=4):

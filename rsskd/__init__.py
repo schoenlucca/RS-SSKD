@@ -14,6 +14,8 @@ Módulos:
              from rsskd.augment import RandomDihedral, make_loader
     detector: o aluno, Mask R-CNN com ResNet-101 + FPN e 6 canais:
              from rsskd.detector import build_student
+    evaluation: previsões -> copas e métricas (professor e aluno):
+             from rsskd.evaluation import evaluate_student, CrownMetrics
 """
 
 from .losses import base_loss, cam_consistency, distill_loss, make_teacher, t_flip, t_scale
