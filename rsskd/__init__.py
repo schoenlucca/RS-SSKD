@@ -18,6 +18,8 @@ Módulos:
              from rsskd.evaluation import evaluate_student, CrownMetrics
     train:   passo de treino, aquecimento da taxa e otimizador:
              from rsskd.train import train_step, warmup_lr, make_optimizer
+    consistency: consistência do RS-SSKD no Mask R-CNN (mapas da RPN):
+             from rsskd.consistency import objectness_maps
 """
 
 from .losses import base_loss, cam_consistency, distill_loss, make_teacher, t_flip, t_scale
