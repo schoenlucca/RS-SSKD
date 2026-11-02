@@ -3,6 +3,11 @@
 Uso:
     python scripts/overfit_check.py
     python scripts/overfit_check.py --n-imagens 4 --passos 300
+    python scripts/overfit_check.py --consistencia nenhuma      # só o professor
+    python scripts/overfit_check.py --consistencia sorteio --peso-consistencia 10
+
+Por padrão, treina com a perda da etapa 1 completa: copas do TEBAKA mais a
+consistência do RS-SSKD (as 3 transformações do artigo, lambda = 1).
 
 **A ideia.** Antes de gastar horas de GPU num treino completo, treinamos o
 aluno só em 4 imagens, sem aumento de dados, por algumas centenas de passos.
@@ -70,6 +75,10 @@ def main(argv=None):
     ap.add_argument("--sem-pretreino", action="store_true",
                     help="não usa os pesos do ImageNet (mais difícil de convergir)")
     ap.add_argument("--dispositivo", default="auto", help="auto, cpu ou cuda")
+    ap.add_argument("--consistencia", default="artigo",
+                    help="artigo (padrão), sorteio, nenhuma ou lista (ex.: flip,rot90)")
+    ap.add_argument("--peso-consistencia", type=float, default=1.0,
+                    help="lambda da consistência do RS-SSKD (1 no artigo)")
     ap.add_argument("--semente", type=int, default=0)
     ap.add_argument("--saida", default="saidas/sobreajuste")
     args = ap.parse_args(argv)
@@ -93,8 +102,10 @@ def main(argv=None):
                           image_size=image_size).to(device)
     opt = make_optimizer(model, lr=args.lr)
     warmup = min(50, args.passos // 4)
+    consistency = None if args.consistencia == "nenhuma" else args.consistencia
     print(f"Imagens {idx} ({args.split}), {args.passos} passos, lote {args.lote}, "
-          f"dispositivo {device}, pré-treino {'não' if args.sem_pretreino else 'sim'}")
+          f"dispositivo {device}, pré-treino {'não' if args.sem_pretreino else 'sim'}, "
+          f"consistência {args.consistencia} (lambda {args.peso_consistencia})")
 
     # 3. Treino: percorre as poucas imagens repetidamente.
     history, step, start = [], 0, time.time()
@@ -103,12 +114,16 @@ def main(argv=None):
             if step >= args.passos:
                 break
             lr = warmup_lr(opt, step, warmup, args.lr)
-            losses = train_step(model, opt, images, targets, device)
+            losses = train_step(model, opt, images, targets, device,
+                                consistency=consistency,
+                                consistency_weight=args.peso_consistencia)
             losses.update(passo=step, lr=lr)
             history.append(losses)
             if step % 10 == 0 or step == args.passos - 1:
+                cons = (f"  consistência {losses['loss_consistencia']:.4f}"
+                        if "loss_consistencia" in losses else "")
                 print(f"passo {step:4d}  perda {losses['total']:.3f}  "
-                      f"(máscara {losses['loss_mask']:.3f})  lr {lr:.4f}  "
+                      f"(máscara {losses['loss_mask']:.3f}){cons}  lr {lr:.4f}  "
                       f"{time.time() - start:.0f} s", flush=True)
             step += 1
 
@@ -136,8 +151,9 @@ def main(argv=None):
     passos = [h["passo"] for h in history]
     for key, label in [("total", "total"), ("loss_mask", "máscaras"),
                        ("loss_classifier", "classificação"), ("loss_box_reg", "caixas"),
-                       ("loss_objectness", "RPN")]:
-        ax.plot(passos, [h[key] for h in history], label=label)
+                       ("loss_objectness", "RPN"), ("loss_consistencia", "consistência")]:
+        if key in history[0]:
+            ax.plot(passos, [h[key] for h in history], label=label)
     ax.set_yscale("log")
     ax.set_xlabel("passo")
     ax.set_ylabel("perda")
@@ -165,6 +181,10 @@ def main(argv=None):
     summary = {"imagens": idx, "passos": args.passos, "lote": args.lote,
                "lr": args.lr, "pretreino": not args.sem_pretreino,
                "dispositivo": str(device), "tempo_s": round(time.time() - start),
+               "consistencia": args.consistencia,
+               "peso_consistencia": args.peso_consistencia,
+               "consistencia_inicial": history[0].get("loss_consistencia"),
+               "consistencia_final": history[-1].get("loss_consistencia"),
                "perda_inicial": history[0]["total"], "perda_final": history[-1]["total"],
                "passos_pulados": sum(h["pulado"] for h in history),
                "aluno_x_professor": s_t, "aluno_x_referencia": s_r}

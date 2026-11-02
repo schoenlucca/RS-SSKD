@@ -20,11 +20,22 @@ disparou com taxa 0,005 numa rede sem pré-treino):
   - **limite do gradiente (clipping):** se a norma do gradiente passar de
     um limite, ele é reduzido proporcionalmente. A direção do passo é a
     mesma; só o tamanho fica limitado.
+
+Com a consistência do RS-SSKD ligada (parte 4c), a perda do passo é a
+perda da etapa 1 do aluno:
+
+    L = L_MaskRCNN(imagem original, copas do TEBAKA)
+        + lambda * soma_T L_ss(T)            (rsskd/consistency.py)
+
+Como no artigo, a perda supervisionada (aqui, a do professor TEBAKA) usa só
+a imagem original; as imagens transformadas entram só na consistência.
 """
 
 from __future__ import annotations
 
 import torch
+
+from .consistency import capture_objectness, choose_transforms, consistency_loss
 
 
 def pick_device(name: str = "auto") -> torch.device:
@@ -70,17 +81,39 @@ def to_device(images, targets, device):
 
 
 def train_step(model, optimizer, images, targets, device,
-               max_grad_norm: float = 10.0) -> dict:
+               max_grad_norm: float = 10.0, consistency: str | None = None,
+               consistency_weight: float = 1.0) -> dict:
     """Um passo de treino. Devolve as perdas (números) e a perda total.
+
+    consistency:        None (desligada), "artigo" (as 3 transformações do
+                        RS-SSKD em todo passo), "sorteio" (uma do D4) ou uma
+                        lista de nomes; ver choose_transforms.
+    consistency_weight: o lambda que multiplica a consistência (1 no artigo).
+
+    Além das 5 perdas do Mask R-CNN, devolve "loss_consistencia" (sem o
+    lambda) e "cons_<transformação>" para cada transformação usada.
 
     Se alguma perda virar infinita ou NaN (sinal de treino instável), o passo
     é pulado em vez de estragar os pesos, e "pulado" vem True.
     """
     model.train()
     images, targets = to_device(images, targets, device)
-    losses = model(images, targets)
+    if consistency:
+        with capture_objectness(model) as cap:
+            losses = model(images, targets)        # perda do professor TEBAKA
+    else:
+        cap, losses = {}, model(images, targets)
     total = torch.stack(list(losses.values())).sum()
     out = {k: float(v.detach()) for k, v in losses.items()}
+
+    if consistency:
+        # As imagens do lote têm o mesmo tamanho: empilhamos num tensor só.
+        cons, parts = consistency_loss(model, torch.stack(images),
+                                       cap["objectness"], choose_transforms(consistency))
+        total = total + consistency_weight * cons
+        out["loss_consistencia"] = float(cons.detach())
+        out.update({f"cons_{k}": v for k, v in parts.items()})
+
     out["total"] = float(total.detach())
     if not torch.isfinite(total):
         optimizer.zero_grad(set_to_none=True)

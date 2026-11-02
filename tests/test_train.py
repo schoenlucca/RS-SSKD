@@ -84,3 +84,28 @@ def test_script_de_sobreajuste_roda(tmp_path):
         assert (tmp_path / "saida" / f).exists()
     assert json.loads((tmp_path / "saida" / "resumo.json").read_text(
         encoding="utf-8"))["imagens"] == [0, 1]
+
+
+def test_passo_com_consistencia_do_rsskd():
+    # Com o aluno de verdade (pequeno, sem pré-treino): a consistência entra
+    # na perda total com o peso lambda e aparece separada por transformação.
+    from rsskd.detector import build_student
+
+    torch.manual_seed(0)
+    S = 64
+    m = build_student(pretrained_backbone=False, image_size=S)
+    masks = torch.zeros(1, S, S, dtype=torch.uint8)
+    masks[0, 10:30, 10:30] = 1
+    alvo = {"boxes": torch.tensor([[10.0, 10, 30, 30]]),
+            "labels": torch.ones(1, dtype=torch.int64), "masks": masks}
+    opt = make_optimizer(m, lr=0.0)                      # lr 0: pesos não mudam
+    imgs = [torch.randn(6, S, S), torch.randn(6, S, S)]
+    sem = train_step(m, opt, imgs, [alvo, alvo], "cpu")
+    com = train_step(m, opt, imgs, [alvo, alvo], "cpu", consistency="artigo",
+                     consistency_weight=5.0)
+    assert "loss_consistencia" not in sem
+    assert {"cons_flip", "cons_scale", "cons_flip+scale"} <= set(com)
+    assert com["loss_consistencia"] == pytest.approx(
+        com["cons_flip"] + com["cons_scale"] + com["cons_flip+scale"])
+    mrcnn = sum(com[k] for k in com if k.startswith("loss_") and k != "loss_consistencia")
+    assert com["total"] == pytest.approx(mrcnn + 5.0 * com["loss_consistencia"], rel=1e-4)
