@@ -33,6 +33,8 @@ a imagem original; as imagens transformadas entram só na consistência.
 
 from __future__ import annotations
 
+import math
+
 import torch
 
 from .consistency import capture_objectness, choose_transforms, consistency_loss
@@ -68,6 +70,29 @@ def warmup_lr(optimizer, step: int, warmup_steps: int, base_lr: float) -> float:
         lr = base_lr * (0.1 + 0.9 * frac)
     else:
         lr = base_lr
+    for g in optimizer.param_groups:
+        g["lr"] = lr
+    return lr
+
+
+def lr_schedule(optimizer, step: int, total_steps: int, warmup_steps: int,
+                base_lr: float, min_ratio: float = 0.01) -> float:
+    """Taxa de aprendizado do treino completo: aquecimento + decaimento cosseno.
+
+        aquecimento (passos 0 .. warmup):   sobe de base_lr/10 até base_lr;
+        depois, até o último passo:         desce suavemente, em forma de
+                                            meia onda de cosseno, até
+                                            base_lr * min_ratio.
+
+    Passos grandes no meio do treino exploram; passos pequenos no fim
+    "assentam" os pesos num bom ponto, sem ficar pulando em volta dele.
+    Devolve a taxa usada.
+    """
+    if step < warmup_steps:
+        return warmup_lr(optimizer, step, warmup_steps, base_lr)
+    progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+    progress = min(progress, 1.0)
+    lr = base_lr * (min_ratio + (1 - min_ratio) * 0.5 * (1 + math.cos(math.pi * progress)))
     for g in optimizer.param_groups:
         g["lr"] = lr
     return lr
