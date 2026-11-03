@@ -22,6 +22,8 @@ Módulos:
              from rsskd.consistency import objectness_maps
     distill: auto-destilação do RS-SSKD no Mask R-CNN (etapa 2):
              from rsskd.distill import capture_roi, distillation_loss, freeze
+    rules:   regra 1 de Harmon et al. (área média das copas), etapa 2:
+             from rsskd.rules import rules_loss_from_capture, reference_area
 """
 
 from .losses import base_loss, cam_consistency, distill_loss, make_teacher, t_flip, t_scale
