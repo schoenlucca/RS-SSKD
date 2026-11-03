@@ -20,6 +20,8 @@ Módulos:
              from rsskd.train import train_step, warmup_lr, make_optimizer
     consistency: consistência do RS-SSKD no Mask R-CNN (mapas da RPN):
              from rsskd.consistency import objectness_maps
+    distill: auto-destilação do RS-SSKD no Mask R-CNN (etapa 2):
+             from rsskd.distill import capture_roi, distillation_loss, freeze
 """
 
 from .losses import base_loss, cam_consistency, distill_loss, make_teacher, t_flip, t_scale
