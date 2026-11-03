@@ -199,3 +199,47 @@ def test_parada_antecipada_e_avaliacao(dados_falsos, tmp_path):
     assert set(s_ref) == set(s_prof) and "f1" in s_ref
     for ext in ["json", "csv", "png"]:
         assert (run / f"avaliacao_val_melhor.{ext}").exists()
+
+
+def test_comparacao_dos_treinos(tmp_path):
+    # Dois treinos falsos (só config e histórico) e um antigo, sem validação.
+    pytest.importorskip("matplotlib")
+    import csv
+
+    from compare_runs import main as comparar
+
+    def treino(nome, lam, linhas):
+        d = tmp_path / "runs" / nome
+        d.mkdir(parents=True)
+        (d / "config.json").write_text(json.dumps(
+            {"peso_consistencia": lam, "consistencia": "artigo", "criterio": "professor"}),
+            encoding="utf-8")
+        with open(d / "historico.csv", "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=list(linhas[0]))
+            w.writeheader()
+            w.writerows(linhas)
+
+    def linha(ep, f1, prof, melhor):
+        return {"epoca": ep, "tempo_s": 60, "loss_mask": 0.3, "val_f1": f1,
+                "val_precisao": f1, "val_revocacao": f1, "val_iou_copa": 0.7,
+                "val_erro_contagem": 2.0, "valprof_f1": prof, "melhor": melhor}
+
+    treino("lambda0", 0, [linha(0, 0.40, 0.60, 1), linha(1, 0.45, 0.70, 1),
+                          linha(2, 0.50, 0.65, 0)])
+    treino("lambda100", 100, [linha(0, 0.42, 0.62, 1), linha(1, 0.52, 0.61, 0)])
+    treino("antigo", 1, [{"epoca": 0, "tempo_s": 60, "loss_mask": 0.4}])
+
+    linhas = comparar(["--pasta-runs", str(tmp_path / "runs"), "--pasta",
+                       str(tmp_path / "nada"), "--saida", str(tmp_path / "saidas")])
+    por_nome = {r["treino"]: r for r in linhas}
+    # A época escolhida é a do melhor.pt (a última marcada como melhor),
+    # mesmo que outra época tenha F1 maior contra a referência.
+    assert por_nome["lambda0"]["epoca_escolhida"] == 1
+    assert por_nome["lambda0"]["ref_f1"] == 0.45
+    assert por_nome["lambda100"]["consistencia"] == "artigo"
+    assert por_nome["lambda0"]["consistencia"] == "desligada"
+    assert por_nome["antigo"]["ref_f1"] == ""          # sem validação: em branco
+    assert por_nome["lambda0"]["tempo_min"] == 3
+    md = (tmp_path / "saidas" / "comparacao.md").read_text(encoding="utf-8")
+    assert "| lambda0 | 0 | 1 | 0.45 |" in md and "—" in md
+    assert (tmp_path / "saidas" / "comparacao.png").exists()
