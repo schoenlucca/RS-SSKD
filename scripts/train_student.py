@@ -11,19 +11,36 @@ O que acontece em cada época:
        numa orientação sorteada (aumento de dados D4, parte 2c);
     2. em cada lote, um passo de treino com a perda da etapa 1 (parte 4c):
            L = L_MaskRCNN(copas do TEBAKA) + lambda * consistência RS-SSKD;
-    3. no fim da época, a média de cada perda vai para o histórico, e o
-       modelo é salvo (ultimo.pt), para poder retomar se o treino parar.
+    3. no fim da época, o aluno é avaliado nas 59 imagens de validação
+       (parte 5b), contra a referência e contra as copas do professor;
+    4. a média de cada perda e as métricas vão para o histórico, e o modelo
+       é salvo (ultimo.pt), para poder retomar se o treino parar;
+    5. se for o melhor até agora pelo critério escolhido, é salvo também em
+       melhor.pt; se passar `--paciencia` épocas sem melhorar, o treino para
+       (parada antecipada).
+
+**Critério para escolher o melhor modelo (`--criterio`).**
+    professor  (padrão) F1 do aluno contra as copas do TEBAKA na validação.
+               Não usa nenhum rótulo humano, coerente com a proposta do
+               projeto e aplicável às imagens do drone, que não terão
+               referência.
+    referencia F1 contra as máscaras de referência da validação. Escolhe
+               melhor para o AgML, mas usa rótulos humanos para decidir,
+               o que precisa ser declarado no relatório.
+    nenhum     sem escolha nem parada: o modelo final é o da última época.
+As métricas contra a referência são sempre registradas, qualquer que seja o
+critério; o conjunto de teste nunca é usado aqui.
 
 A taxa de aprendizado sobe nos primeiros passos (aquecimento) e depois desce
 em forma de cosseno até o fim do treino (rsskd/train.py, lr_schedule).
 
 Saídas em runs/<nome>/ (pasta ignorada pelo git):
     config.json     todos os parâmetros do treino
-    historico.csv   uma linha por época, com a média de cada perda
+    historico.csv   uma linha por época: média de cada perda e métricas na
+                    validação (val_* contra a referência, valprof_* contra o
+                    professor) e se foi o melhor até então
     ultimo.pt       pesos do modelo e estado do otimizador (~500 MB)
-
-A avaliação na validação, o melhor modelo e a parada antecipada vêm na
-parte 5b.
+    melhor.pt       pesos do melhor modelo pelo critério (~250 MB)
 """
 
 from __future__ import annotations
@@ -44,6 +61,7 @@ from rsskd.augment import RandomDihedral, make_loader  # noqa: E402
 from rsskd.data import DEFAULT_DIR  # noqa: E402
 from rsskd.dataset import CrownDataset  # noqa: E402
 from rsskd.detector import build_student  # noqa: E402
+from rsskd.evaluation import CrownMetrics, evaluate_student, format_summary  # noqa: E402
 from rsskd.inputs import InputSpec  # noqa: E402
 from rsskd.train import lr_schedule, make_optimizer, pick_device, train_step  # noqa: E402
 
@@ -71,6 +89,11 @@ def parse_args(argv=None):
     ap.add_argument("--saida", default="runs")
     ap.add_argument("--continuar", action="store_true",
                     help="retoma do ultimo.pt, se existir")
+    ap.add_argument("--criterio", default="professor",
+                    choices=["professor", "referencia", "nenhum"],
+                    help="como escolher o melhor modelo na validação")
+    ap.add_argument("--paciencia", type=int, default=6,
+                    help="épocas sem melhorar antes de parar (0 desliga)")
     ap.add_argument("--max-passos-por-epoca", type=int, default=None,
                     help="limita os passos por época (para testes rápidos)")
     return ap.parse_args(argv)
@@ -97,6 +120,8 @@ def main(argv=None):
     train_ds = CrownDataset("train", args.copas, spec, dataset_dir=args.pasta,
                             transform=None if args.sem_aumento else RandomDihedral())
     loader = make_loader(train_ds, batch_size=args.lote, shuffle=True)
+    # Validação: sem aumento de dados, para coincidir com a referência.
+    val_ds = CrownDataset("val", args.copas, spec, dataset_dir=args.pasta)
     steps_per_epoch = len(loader)
     if args.max_passos_por_epoca:
         steps_per_epoch = min(steps_per_epoch, args.max_passos_por_epoca)
@@ -109,6 +134,7 @@ def main(argv=None):
 
     # Retomar um treino interrompido.
     start_epoch, step = 0, 0
+    best_score, best_epoch = -1.0, -1
     ckpt_path = run_dir / "ultimo.pt"
     if args.continuar and ckpt_path.exists():
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
@@ -116,6 +142,7 @@ def main(argv=None):
         opt.load_state_dict(ckpt["otimizador"])
         start_epoch, step = ckpt["epoca"] + 1, ckpt["passo"]
         torch.set_rng_state(ckpt["rng"])
+        best_score, best_epoch = ckpt.get("melhor_score", -1.0), ckpt.get("melhor_epoca", -1)
         print(f"Retomando de {ckpt_path}, época {start_epoch}")
     elif (run_dir / "historico.csv").exists():
         (run_dir / "historico.csv").unlink()   # treino novo: histórico novo
@@ -148,9 +175,29 @@ def main(argv=None):
                 print(f"  época {epoch} passo {n}/{steps_per_epoch}  "
                       f"perda {losses['total']:.3f}  lr {lr:.5f}", flush=True)
 
-        # Médias da época no histórico.
+        # Médias da época.
         row = {"epoca": epoch, "lr_final": lr, "tempo_s": round(time.time() - start)}
         row |= {k: (v if k == "pulados" else v / n) for k, v in sums.items()}
+
+        # Avaliação na validação: contra a referência e contra o professor,
+        # numa passada só.
+        vs_teacher = CrownMetrics()
+        s_ref, _ = evaluate_student(model, val_ds, device, teacher_metrics=vs_teacher)
+        s_prof = vs_teacher.summary()
+        row |= {f"val_{k}": v for k, v in s_ref.items()}
+        row |= {f"valprof_{k}": v for k, v in s_prof.items()}
+
+        # Melhor modelo e parada antecipada.
+        score = {"professor": s_prof["f1"], "referencia": s_ref["f1"],
+                 "nenhum": float(epoch)}[args.criterio]
+        improved = score > best_score
+        if improved:
+            best_score, best_epoch = score, epoch
+            torch.save({"modelo": model.state_dict(), "epoca": epoch,
+                        "criterio": args.criterio, "score": score,
+                        "val_referencia": s_ref, "val_professor": s_prof,
+                        "config": config}, run_dir / "melhor.pt")
+        row["melhor"] = int(improved)
         hist = run_dir / "historico.csv"
         new = not hist.exists()
         with open(hist, "a", newline="", encoding="utf-8") as f:
@@ -161,13 +208,24 @@ def main(argv=None):
         cons = (f"  consistência {row['loss_consistencia']:.4f}"
                 if "loss_consistencia" in row else "")
         print(f"Época {epoch}: perda {row['total']:.3f}  máscara {row['loss_mask']:.3f}"
-              f"{cons}  ({row['tempo_s']} s)", flush=True)
+              f"{cons}  ({row['tempo_s']} s)\n"
+              f"  validação x referência: {format_summary(s_ref)}\n"
+              f"  validação x professor:  {format_summary(s_prof)}"
+              f"{'   <- melhor' if improved else ''}", flush=True)
 
         torch.save({"modelo": model.state_dict(), "otimizador": opt.state_dict(),
                     "epoca": epoch, "passo": step, "rng": torch.get_rng_state(),
+                    "melhor_score": best_score, "melhor_epoca": best_epoch,
                     "config": config}, ckpt_path)
 
-    print(f"Fim. Histórico e modelo em {run_dir}/")
+        if (args.criterio != "nenhum" and args.paciencia > 0
+                and epoch - best_epoch >= args.paciencia):
+            print(f"Parada antecipada: {args.paciencia} épocas sem melhorar "
+                  f"(melhor: época {best_epoch}).")
+            break
+
+    print(f"Fim. Melhor modelo: época {best_epoch} ({args.criterio}). "
+          f"Histórico e modelos em {run_dir}/")
     return run_dir
 
 

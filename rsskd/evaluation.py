@@ -133,13 +133,19 @@ def format_summary(s: dict) -> str:
 @torch.no_grad()
 def evaluate_student(model, dataset, device: str | torch.device = "cpu",
                      score_thr: float = 0.5, mask_thr: float = 0.5,
-                     min_area: int = 0, batch_size: int = 4):
+                     min_area: int = 0, batch_size: int = 4,
+                     teacher_metrics: CrownMetrics | None = None):
     """Roda o aluno em todas as imagens de `dataset` e mede contra a referência.
 
     dataset: um CrownDataset **sem** transformação (as imagens na orientação
              original, para coincidirem com a referência).
     Retorna (resumo, CrownMetrics). As copas do professor que vêm no alvo
-    são ignoradas: o aluno é medido só contra a referência.
+    são ignoradas: o aluno é medido contra a referência.
+
+    teacher_metrics: se for passado um CrownMetrics, ele é preenchido, na
+    mesma passada, com a comparação do aluno contra as copas do professor
+    (TEBAKA) nessas imagens. Não usa nenhum rótulo humano: é o critério
+    "sem rótulos" para escolher o melhor modelo (parte 5b).
     """
     if getattr(dataset, "transform", None) is not None:
         raise ValueError("Avalie com um CrownDataset sem transform.")
@@ -152,5 +158,7 @@ def evaluate_student(model, dataset, device: str | torch.device = "cpu",
             i = int(t["image_id"])
             pred = predictions_to_instances(out, score_thr, mask_thr, min_area)
             metrics.add(pred, dataset.reference(i), index=i)
+            if teacher_metrics is not None:
+                teacher_metrics.add(pred, dataset.store.load(dataset.split, i), index=i)
     model.train(was_training)
     return metrics.summary(), metrics

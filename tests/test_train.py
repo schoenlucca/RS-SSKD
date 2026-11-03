@@ -144,14 +144,16 @@ def test_script_de_treino_e_retomada(dados_falsos, tmp_path):
             "--entrada", str(entrada), "--lote", "1", "--sem-pretreino",
             "--dispositivo", "cpu", "--saida", str(tmp_path / "runs"),
             "--aquecimento", "1", "--max-passos-por-epoca", "1"]
-    run = main(base + ["--epocas", "2"])
+    run = main(base + ["--epocas", "2", "--paciencia", "0"])
     linhas = list(csv.DictReader(open(run / "historico.csv", encoding="utf-8")))
     assert [r["epoca"] for r in linhas] == ["0", "1"]
     assert "loss_consistencia" in linhas[0]               # padrão: artigo
-    assert (run / "ultimo.pt").exists() and (run / "config.json").exists()
+    assert {"val_f1", "valprof_f1", "melhor"} <= set(linhas[0])   # validação
+    for f in ["ultimo.pt", "melhor.pt", "config.json"]:
+        assert (run / f).exists()
 
     # Retomar até a época 3: só a época 2 é treinada, e o histórico continua.
-    main(base + ["--epocas", "3", "--continuar"])
+    main(base + ["--epocas", "3", "--continuar", "--paciencia", "0"])
     linhas = list(csv.DictReader(open(run / "historico.csv", encoding="utf-8")))
     assert [r["epoca"] for r in linhas] == ["0", "1", "2"]
     ckpt = torch.load(run / "ultimo.pt", weights_only=False)
@@ -171,3 +173,29 @@ def test_lambda_zero_desliga_a_consistencia(dados_falsos, tmp_path):
                 "--peso-consistencia", "0"])
     linha = next(csv.DictReader(open(run / "historico.csv", encoding="utf-8")))
     assert "loss_consistencia" not in linha
+
+
+def test_parada_antecipada_e_avaliacao(dados_falsos, tmp_path):
+    import csv
+
+    from evaluate_student import main as avaliar
+    from train_student import main as treinar
+
+    dados, pseudo, entrada = dados_falsos
+    # Um aluno quase sem treino não melhora o F1 depois da 1a época: com
+    # paciência 1, o treino tem de parar na época 1, e não ir até a 5.
+    run = treinar(["--nome", "parada", "--pasta", str(dados), "--copas", str(pseudo),
+                   "--entrada", str(entrada), "--lote", "1", "--sem-pretreino",
+                   "--dispositivo", "cpu", "--saida", str(tmp_path / "runs"),
+                   "--epocas", "5", "--max-passos-por-epoca", "1",
+                   "--lr", "0", "--paciencia", "1"])
+    linhas = list(csv.DictReader(open(run / "historico.csv", encoding="utf-8")))
+    assert [r["epoca"] for r in linhas] == ["0", "1"]
+    assert linhas[0]["melhor"] == "1" and linhas[1]["melhor"] == "0"
+    assert torch.load(run / "melhor.pt", weights_only=False)["epoca"] == 0
+
+    # O script de avaliação carrega o melhor modelo e grava as saídas.
+    s_ref, s_prof = avaliar(["--run", str(run), "--dispositivo", "cpu", "--n-figura", "2"])
+    assert set(s_ref) == set(s_prof) and "f1" in s_ref
+    for ext in ["json", "csv", "png"]:
+        assert (run / f"avaliacao_val_melhor.{ext}").exists()
