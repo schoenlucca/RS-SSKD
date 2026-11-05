@@ -39,7 +39,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-METRICS = ["f1", "precisao", "revocacao", "iou_copa", "erro_contagem"]
+METRICS = ["f1", "precisao", "revocacao", "iou_copa", "erro_contagem",
+           "area_mae", "area_kl"]
 
 
 def read_run(run_dir: Path) -> dict | None:
@@ -118,6 +119,7 @@ def to_markdown(rows: list[dict]) -> str:
             ("ref_revocacao", "R", ".2f"), ("ref_f1", "F1", ".2f"),
             ("ref_iou_copa", "IoU copa", ".2f"),
             ("ref_erro_contagem", "Erro contagem", ".1f"),
+            ("ref_area_mae", "MAE área (px)", ".0f"), ("ref_area_kl", "KL área", ".2f"),
             ("prof_f1", "F1 x professor", ".2f")]
 
     def cell(v, spec):

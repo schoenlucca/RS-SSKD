@@ -28,7 +28,14 @@ medidos exatamente do mesmo jeito:
     precisão, revocação e F1 por copa (acerto = IoU >= 0,5), somando
     acertos e erros de todas as imagens antes de dividir (média "micro");
     IoU médio das copas acertadas; IoU por pixel (copa contra fundo);
-    erro médio de contagem (|copas previstas - copas reais| por imagem).
+    erro médio de contagem (|copas previstas - copas reais| por imagem);
+    e as métricas de área de Harmon et al. (parte 7a):
+      - RMSE e MAE da área (pixels), entre cada copa acertada e a copa da
+        referência com que ela casou: o contorno está do tamanho certo?
+      - KL da distribuição de áreas: compara o histograma das áreas de
+        todas as copas previstas com o das copas da referência, acertadas
+        ou não. É a métrica que mostra se a regra 1 corrige as copas
+        fundidas (grandes demais), mesmo quando o F1 pouco muda.
 """
 
 from __future__ import annotations
@@ -87,6 +94,9 @@ class CrownMetrics:
     def __init__(self, iou_thr: float = 0.5):
         self.iou_thr = iou_thr
         self.rows: list[dict] = []
+        self.pred_areas: list[int] = []        # todas as copas previstas
+        self.ref_areas: list[int] = []         # todas as copas da referência
+        self.matched_areas: list[tuple[int, int]] = []   # (prevista, referência)
 
     def add(self, pred: np.ndarray, ref: np.ndarray, index: int | None = None,
             pred_mask: np.ndarray | None = None) -> dict:
@@ -99,6 +109,14 @@ class CrownMetrics:
                "iou_copa": m["mean_iou"],
                "iou_pixel": iou_binary(pred > 0 if pred_mask is None else pred_mask,
                                        ref > 0)}
+        p_area = np.bincount(pred.ravel().astype(np.int64))
+        r_area = np.bincount(ref.ravel().astype(np.int64))
+        self.pred_areas += [int(a) for a in p_area[1:] if a > 0]
+        self.ref_areas += [int(a) for a in r_area[1:] if a > 0]
+        pairs = [(int(p_area[p]), int(r_area[r])) for p, r, _ in m["pairs"]]
+        self.matched_areas += pairs
+        row["erro_area_medio"] = (float(np.mean([abs(a - b) for a, b in pairs]))
+                                  if pairs else "")
         self.rows.append(row)
         return row
 
@@ -117,14 +135,51 @@ class CrownMetrics:
                          if self.rows else 0.0,
             "erro_contagem": float(np.mean([abs(r["n_pred"] - r["n_ref"])
                                             for r in self.rows])) if self.rows else 0.0,
-        }
+        } | self.area_summary()
+
+    def area_summary(self) -> dict:
+        """Métricas de área de Harmon et al. (2022): RMSE, MAE e KL."""
+        if self.matched_areas:
+            d = np.array([a - b for a, b in self.matched_areas], dtype=float)
+            rmse, mae = float(np.sqrt(np.mean(d ** 2))), float(np.mean(np.abs(d)))
+        else:
+            rmse = mae = 0.0
+        return {"area_rmse": rmse, "area_mae": mae,
+                "area_kl": area_kl(self.ref_areas, self.pred_areas),
+                "area_mediana_pred": float(np.median(self.pred_areas)) if self.pred_areas else 0.0,
+                "area_mediana_ref": float(np.median(self.ref_areas)) if self.ref_areas else 0.0}
+
+
+def area_kl(ref_areas, pred_areas, bins: int = 20, eps: float = 0.5) -> float:
+    """KL(referência || previsto) entre as distribuições de áreas das copas.
+
+    As áreas vão para os mesmos `bins` intervalos, em escala logarítmica
+    (áreas de copas variam por ordens de grandeza), entre a menor e a maior
+    área das duas listas. Cada histograma vira uma distribuição de
+    probabilidade; antes, soma-se eps = 0,5 copa a cada intervalo, para um
+    intervalo vazio não fazer a KL explodir por causa de uma copa só. Vale 0
+    quando as duas distribuições coincidem e cresce quando diferem; não é
+    simétrica: mede o quanto o previsto falha em reproduzir a referência.
+    """
+    if not ref_areas or not pred_areas:
+        return 0.0
+    allv = np.asarray(list(ref_areas) + list(pred_areas), dtype=float)
+    lo, hi = max(allv.min(), 1.0), allv.max()
+    if hi <= lo:
+        return 0.0
+    edges = np.logspace(np.log10(lo), np.log10(hi), bins + 1)
+    p = np.histogram(ref_areas, edges)[0] + eps
+    q = np.histogram(pred_areas, edges)[0] + eps
+    p, q = p / p.sum(), q / q.sum()
+    return float(np.sum(p * np.log(p / q)))
 
 
 def format_summary(s: dict) -> str:
     """Resumo numa linha, para imprimir."""
     return (f"P={s['precisao']:.2f} R={s['revocacao']:.2f} F1={s['f1']:.2f} "
             f"IoU_copa={s['iou_copa']:.2f} IoU_pixel={s['iou_pixel']:.2f} "
-            f"erro_contagem={s['erro_contagem']:.1f}")
+            f"erro_contagem={s['erro_contagem']:.1f} "
+            f"MAE_area={s.get('area_mae', 0):.0f}px KL_area={s.get('area_kl', 0):.2f}")
 
 
 # --------------------------------------------------------------------------

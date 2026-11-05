@@ -100,3 +100,30 @@ def test_avaliar_aluno_que_acerta_tudo():
     assert resumo["f1"] == 1.0 and resumo["iou_pixel"] == 1.0
     assert [r["indice"] for r in metricas.rows] == [0, 1, 2]
     assert aluno.training                             # volta ao modo de treino
+
+
+def test_metricas_de_area():
+    from rsskd.evaluation import area_kl
+
+    ref = np.zeros((H, W), np.int32)
+    ref[0:10, 0:10] = 1                       # 100 px
+    ref[20:30, 20:30] = 2                     # 100 px
+    pred = np.zeros((H, W), np.int32)
+    pred[0:10, 0:12] = 1                      # 120 px, casa com a copa 1
+    pred[20:30, 20:30] = 2                    # 100 px, casa com a copa 2
+    pred[12:18, 0:6] = 3                      # 36 px, falso positivo
+    m = CrownMetrics()
+    m.add(pred, ref)
+    s = m.summary()
+    # Erros de área nos acertos: 20 e 0 pixels.
+    assert s["area_mae"] == pytest.approx(10)
+    assert s["area_rmse"] == pytest.approx(np.sqrt((20 ** 2 + 0) / 2))
+    assert s["area_mediana_ref"] == 100 and s["area_mediana_pred"] == 100
+    assert m.rows[0]["erro_area_medio"] == pytest.approx(10)
+    # KL: zero para distribuições iguais, positiva para diferentes, e maior
+    # quanto mais diferentes.
+    assert area_kl([100, 200, 400], [100, 200, 400]) == pytest.approx(0, abs=1e-6)
+    a = area_kl([100] * 10 + [200] * 10, [100] * 10 + [800] * 10)
+    b = area_kl([100] * 10 + [200] * 10, [800] * 20)
+    assert 0 < a < b
+    assert area_kl([], [100]) == 0.0

@@ -233,7 +233,8 @@ def match_instances(pred: np.ndarray, ref: np.ndarray,
     IoU >= 0,5 com uma copa da referência; cada copa da referência só pode
     ser casada uma vez. Retorna verdadeiros positivos (tp), falsos positivos
     (fp), falsos negativos (fn), precisão, revocação, F1 e o IoU médio dos
-    acertos.
+    acertos, e "pairs": a lista (copa prevista, copa da referência, IoU) de
+    cada acerto, usada nas métricas de área.
     """
     pred_ids = [i for i in np.unique(pred) if i > 0]
     ref_ids = [i for i in np.unique(ref) if i > 0]
@@ -251,7 +252,7 @@ def match_instances(pred: np.ndarray, ref: np.ndarray,
             ious[a, b] = (pm & rm).sum() / (pm | rm).sum()
 
     # Casamento guloso: maiores IoU primeiro.
-    tp, matched_ious = 0, []
+    tp, matched_ious, pairs = 0, [], []
     used_p, used_r = set(), set()
     for a, b in sorted(np.argwhere(ious >= iou_thr).tolist(),
                        key=lambda ab: -ious[ab[0], ab[1]]):
@@ -261,6 +262,7 @@ def match_instances(pred: np.ndarray, ref: np.ndarray,
         used_r.add(b)
         tp += 1
         matched_ious.append(ious[a, b])
+        pairs.append((int(pred_ids[a]), int(ref_ids[b]), float(ious[a, b])))
 
     fp, fn = len(pred_ids) - tp, len(ref_ids) - tp
     prec = tp / (tp + fp) if tp + fp else 0.0
@@ -268,4 +270,4 @@ def match_instances(pred: np.ndarray, ref: np.ndarray,
     f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
     return {"tp": tp, "fp": fp, "fn": fn, "precision": prec, "recall": rec,
             "f1": f1, "mean_iou": float(np.mean(matched_ious)) if matched_ious else 0.0,
-            "n_pred": len(pred_ids), "n_ref": len(ref_ids)}
+            "n_pred": len(pred_ids), "n_ref": len(ref_ids), "pairs": pairs}
