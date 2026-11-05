@@ -98,6 +98,23 @@ def mu_schedule(step: int, total_steps: int, mu_max: float,
     return min(mu_max, mu_max * (step - start) / max(1.0, total_steps - start))
 
 
+def load_checkpoint(path, device: "str | torch.device" = "cpu"):
+    """Recria o aluno salvo por scripts/train_student.py e carrega os pesos.
+
+    Devolve (modelo em modo de avaliação, config do treino, checkpoint).
+    Funciona com melhor.pt e com ultimo.pt.
+    """
+    from .detector import build_student
+    from .inputs import InputSpec
+
+    ckpt = torch.load(path, map_location=device, weights_only=False)
+    cfg = ckpt["config"]
+    spec = InputSpec.load(cfg["entrada"])
+    model = build_student(spec.in_channels, not cfg["sem_pretreino"])
+    model.load_state_dict(ckpt["modelo"])
+    return model.to(device).eval(), cfg, ckpt
+
+
 def pick_device(name: str = "auto") -> torch.device:
     """'auto' usa a GPU (cuda) se houver; senão, a CPU."""
     if name == "auto":
@@ -186,7 +203,7 @@ def train_step(model, optimizer, images, targets, device,
     model.train()
     images, targets = to_device(images, targets, device)
     use_roi = stage2 is not None and (stage2.teacher is not None
-                                      or (stage2.rule_area is not None and stage2.mu > 0))
+                                      or stage2.rule_area is not None)
     # Os ganchos só escutam o passo normal; a consistência roda depois,
     # fora deles, para não sobrescrever o que foi guardado.
     with ExitStack() as stack:
@@ -206,7 +223,9 @@ def train_step(model, optimizer, images, targets, device,
         total = total + stage2.kd_weight * kd
         out["loss_kd"] = float(kd.detach())
         out.update(parts)
-    if stage2 is not None and stage2.rule_area is not None and stage2.mu > 0:
+    if stage2 is not None and stage2.rule_area is not None:
+        # Calculada mesmo com mu = 0 (no começo do treino), para o histórico
+        # mostrar a regra desde o início; com mu = 0 ela não pesa.
         rule, parts = rules_loss_from_capture(roi, stage2.rule_area, stage2.rule_k,
                                               stage2.rule_C, stage2.rule_lam)
         total = total + stage2.mu * rule

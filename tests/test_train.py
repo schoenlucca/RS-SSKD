@@ -241,7 +241,7 @@ def test_comparacao_dos_treinos(tmp_path):
     assert por_nome["antigo"]["ref_f1"] == ""          # sem validação: em branco
     assert por_nome["lambda0"]["tempo_min"] == 3
     md = (tmp_path / "saidas" / "comparacao.md").read_text(encoding="utf-8")
-    assert "| lambda0 | 0 | 1 | 0.45 |" in md and "—" in md
+    assert "| lambda0 | 1 | 0 | 0 | 0 | 1 | 0.45 |" in md and "—" in md
     assert (tmp_path / "saidas" / "comparacao.png").exists()
 
 
@@ -288,6 +288,34 @@ def test_passo_da_etapa_2_combina_as_perdas():
     assert out["total"] == pytest.approx(esperado, rel=1e-4)
     assert out["loss_kd"] > 0 and out["loss_regra1"] > 0
 
-    # mu = 0 desliga a regra; sem professor, não há destilação.
+    # mu = 0: a regra é medida, mas não pesa; sem professor, não há destilação.
     out = train_step(m, opt, imgs, [alvo, alvo], "cpu", stage2=Stage2(mu=0.0, rule_area=150.0))
-    assert "loss_regra1" not in out and "loss_kd" not in out and out["mu"] == 0.0
+    assert "loss_kd" not in out and out["mu"] == 0.0 and out["loss_regra1"] > 0
+    outras = sum(out[k] for k in ["loss_classifier", "loss_box_reg", "loss_mask",
+                                  "loss_objectness", "loss_rpn_box_reg"])
+    assert out["total"] == pytest.approx(outras, rel=1e-4)
+    # Sem área de referência, a regra não aparece.
+    out = train_step(m, opt, imgs, [alvo, alvo], "cpu", stage2=Stage2(mu=0.5))
+    assert "loss_regra1" not in out
+
+
+def test_treino_da_etapa_2(dados_falsos, tmp_path):
+    # Etapa 1 curtinha, depois etapa 2 com ela como professor e a regra 1.
+    import csv
+
+    from train_student import main
+
+    dados, pseudo, entrada = dados_falsos
+    base = ["--pasta", str(dados), "--copas", str(pseudo), "--entrada", str(entrada),
+            "--lote", "1", "--sem-pretreino", "--dispositivo", "cpu",
+            "--saida", str(tmp_path / "runs"), "--epocas", "2",
+            "--max-passos-por-epoca", "1", "--aquecimento", "1", "--paciencia", "0"]
+    etapa1 = main(["--nome", "e1"] + base)
+    etapa2 = main(["--nome", "e2", "--professor", str(etapa1 / "melhor.pt"),
+                   "--mu-max", "0.5", "--peso-kd", "2"] + base)
+    cfg = json.loads((etapa2 / "config.json").read_text(encoding="utf-8"))
+    assert cfg["etapa"] == 2 and cfg["area_regra_usada"] == 400   # caixa 20x20 do falso
+    linhas = list(csv.DictReader(open(etapa2 / "historico.csv", encoding="utf-8")))
+    assert {"loss_kd", "kd_cls", "kd_mask", "loss_regra1", "mu"} <= set(linhas[0])
+    # mu sobe com o passo: 0 no 1o passo, metade no 2o (média de 1 passo/época).
+    assert [float(r["mu"]) for r in linhas] == [0.0, 0.25]

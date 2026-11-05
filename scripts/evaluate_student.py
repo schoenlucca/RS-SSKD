@@ -37,24 +37,19 @@ import torch  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rsskd.dataset import CrownDataset  # noqa: E402
-from rsskd.detector import build_student  # noqa: E402
 from rsskd.evaluation import (  # noqa: E402
     CrownMetrics, evaluate_student, format_summary, predictions_to_instances,
 )
 from rsskd.inputs import InputSpec  # noqa: E402
-from rsskd.train import pick_device  # noqa: E402
+from rsskd.train import load_checkpoint, pick_device  # noqa: E402
 from overfit_check import colorize  # noqa: E402
 from show_batch import rgb_from_input  # noqa: E402
 
 
 def load_student(run_dir: Path, which: str, device):
     """Recria o aluno com a configuração do treino e carrega os pesos."""
-    ckpt = torch.load(run_dir / f"{which}.pt", map_location=device, weights_only=False)
-    cfg = ckpt["config"]
-    spec = InputSpec.load(cfg["entrada"])
-    model = build_student(spec.in_channels, not cfg["sem_pretreino"])
-    model.load_state_dict(ckpt["modelo"])
-    return model.to(device).eval(), spec, cfg, ckpt
+    model, cfg, ckpt = load_checkpoint(run_dir / f"{which}.pt", device)
+    return model, InputSpec.load(cfg["entrada"]), cfg, ckpt
 
 
 def main(argv=None):

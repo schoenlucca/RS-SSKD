@@ -75,7 +75,9 @@ def summarize(run: dict) -> dict:
     cfg, row = run["config"], chosen_epoch(run)
     lam = cfg.get("peso_consistencia", 0)
     cons = cfg.get("consistencia", "") if lam else "desligada"
-    out = {"treino": run["nome"], "lambda": lam, "consistencia": cons,
+    out = {"treino": run["nome"], "etapa": cfg.get("etapa", 1), "lambda": lam,
+           "consistencia": cons, "mu_max": cfg.get("mu_max", 0),
+           "peso_kd": cfg.get("peso_kd", 0) if cfg.get("professor") else 0,
            "criterio": cfg.get("criterio", "nenhum"),
            "epocas": len(run["historico"]), "epoca_escolhida": int(row["epoca"]),
            "tempo_min": round(sum(r.get("tempo_s", 0) for r in run["historico"]) / 60)}
@@ -100,7 +102,8 @@ def teacher_baseline(dataset_dir, pseudo_dir) -> dict | None:
         s = m.summary()
     except (FileNotFoundError, OSError):
         return None
-    out = {"treino": "professor TEBAKA", "lambda": "", "consistencia": "",
+    out = {"treino": "professor TEBAKA", "etapa": "", "lambda": "", "consistencia": "",
+           "mu_max": "", "peso_kd": "",
            "criterio": "", "epocas": "", "epoca_escolhida": "", "tempo_min": ""}
     out |= {f"ref_{k}": s[k] for k in METRICS}
     out |= {f"prof_{k}": "" for k in METRICS}
@@ -109,7 +112,8 @@ def teacher_baseline(dataset_dir, pseudo_dir) -> dict | None:
 
 def to_markdown(rows: list[dict]) -> str:
     """Tabela em Markdown. As métricas vão com 2 casas (erro de contagem, 1)."""
-    cols = [("treino", "Treino", None), ("lambda", "λ", "g"),
+    cols = [("treino", "Treino", None), ("etapa", "Etapa", "g"), ("lambda", "λ", "g"),
+            ("mu_max", "μ", "g"), ("peso_kd", "β", "g"),
             ("epoca_escolhida", "Época", "g"), ("ref_precisao", "P", ".2f"),
             ("ref_revocacao", "R", ".2f"), ("ref_f1", "F1", ".2f"),
             ("ref_iou_copa", "IoU copa", ".2f"),

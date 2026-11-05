@@ -1,10 +1,25 @@
-"""Treino completo do aluno, etapa 1 (item 5).
+"""Treino completo do aluno: etapa 1 (item 5) e etapa 2 (parte 6d).
 
-Uso:
+Uso, etapa 1:
     python scripts/train_student.py --nome lambda1
     python scripts/train_student.py --nome lambda0   --peso-consistencia 0
     python scripts/train_student.py --nome lambda100 --peso-consistencia 100
     python scripts/train_student.py --nome lambda1 --continuar   # retoma
+
+Uso, etapa 2 (com um aluno da etapa 1 como professor):
+    python scripts/train_student.py --nome etapa2 --professor runs/lambda100/melhor.pt
+    python scripts/train_student.py --nome etapa2_regra --professor runs/lambda100/melhor.pt \
+        --mu-max 0.3
+    python scripts/train_student.py --nome so_regra --mu-max 0.3     # regra sem destilação
+
+Na etapa 2, a perda do passo é (rsskd/train.py, Stage2):
+    (1 - mu) * classificação + demais perdas do Mask R-CNN    (TEBAKA)
+    + mu * regra 1 de Harmon        (se --mu-max > 0)
+    + beta * auto-destilação        (se --professor; beta = --peso-kd)
+    + lambda * consistência         (como na etapa 1)
+O aluno novo começa dos pesos do ImageNet (born-again); --iniciar-do-professor
+começa dos pesos do professor. A área de referência da regra é a mediana
+(ou a média) das caixas das copas do TEBAKA no treino, calculada no início.
 
 O que acontece em cada época:
     1. as 476 imagens de treino são embaralhadas e lidas em lotes, cada uma
@@ -63,7 +78,12 @@ from rsskd.dataset import CrownDataset  # noqa: E402
 from rsskd.detector import build_student  # noqa: E402
 from rsskd.evaluation import CrownMetrics, evaluate_student, format_summary  # noqa: E402
 from rsskd.inputs import InputSpec  # noqa: E402
-from rsskd.train import lr_schedule, make_optimizer, pick_device, train_step  # noqa: E402
+from rsskd.distill import freeze  # noqa: E402
+from rsskd.rules import reference_area  # noqa: E402
+from rsskd.train import (  # noqa: E402
+    Stage2, load_checkpoint, lr_schedule, make_optimizer, mu_schedule, pick_device,
+    train_step,
+)
 
 
 def parse_args(argv=None):
@@ -94,9 +114,44 @@ def parse_args(argv=None):
                     help="como escolher o melhor modelo na validação")
     ap.add_argument("--paciencia", type=int, default=6,
                     help="épocas sem melhorar antes de parar (0 desliga)")
+    # Etapa 2
+    ap.add_argument("--professor", default=None,
+                    help="melhor.pt (ou ultimo.pt) da etapa 1: liga a auto-destilação")
+    ap.add_argument("--peso-kd", type=float, default=1.0, help="beta da auto-destilação")
+    ap.add_argument("--temperatura", type=float, default=4.0)
+    ap.add_argument("--peso-kd-mascara", type=float, default=1.0,
+                    help="peso da KL das máscaras dentro da auto-destilação")
+    ap.add_argument("--iniciar-do-professor", action="store_true",
+                    help="aluno começa com os pesos do professor (padrão: ImageNet)")
+    ap.add_argument("--mu-max", type=float, default=0.0,
+                    help="mu final da regra 1 de Harmon; 0 desliga a regra")
+    ap.add_argument("--mu-inicio", type=float, default=0.0,
+                    help="fração do treino antes de mu começar a subir")
+    ap.add_argument("--area-regra", type=float, default=None,
+                    help="área de referência (px); padrão: calculada das copas do TEBAKA")
+    ap.add_argument("--estat-area", default="mediana", choices=["mediana", "media"])
+    ap.add_argument("--regra-k", type=float, default=5.0)
+    ap.add_argument("--regra-C", type=float, default=1.0)
+    ap.add_argument("--regra-lambda", type=float, default=1.0)
     ap.add_argument("--max-passos-por-epoca", type=int, default=None,
                     help="limita os passos por época (para testes rápidos)")
     return ap.parse_args(argv)
+
+
+def append_history(path: Path, row: dict) -> None:
+    """Acrescenta uma linha ao histórico. Se a linha trouxer uma coluna nova
+    (por exemplo, a regra, que só entra quando mu > 0), o arquivo é reescrito
+    com todas as colunas, para nenhum valor cair na coluna errada."""
+    rows = []
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    rows.append(row)
+    fields = list(dict.fromkeys(k for r in rows for k in r))
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields, restval="")
+        w.writeheader()
+        w.writerows(rows)
 
 
 def set_seed(seed: int):
@@ -130,6 +185,32 @@ def main(argv=None):
 
     model = build_student(spec.in_channels, not args.sem_pretreino,
                           image_size=image_size).to(device)
+
+    # Etapa 2: professor congelado e área de referência da regra.
+    stage2, extra = None, {}
+    if args.professor or args.mu_max > 0:
+        teacher = None
+        if args.professor:
+            loaded, t_cfg, t_ckpt = load_checkpoint(args.professor, device)
+            if InputSpec.load(t_cfg["entrada"]).in_channels != spec.in_channels:
+                raise ValueError("O professor foi treinado com outra entrada.")
+            teacher = freeze(loaded)
+            if args.iniciar_do_professor:
+                model.load_state_dict(t_ckpt["modelo"])
+            extra["professor_epoca"] = t_ckpt["epoca"]
+            print(f"Professor: {args.professor} (época {t_ckpt['epoca']}), congelado")
+        area = args.area_regra
+        if args.mu_max > 0 and area is None:
+            store = train_ds.store
+            area = reference_area((store.load("train", i) for i in store.indices("train")),
+                                  args.estat_area)
+            print(f"Área de referência da regra 1 ({args.estat_area} das caixas do "
+                  f"TEBAKA no treino): {area:.0f} px")
+        extra["area_regra_usada"] = area
+        stage2 = Stage2(teacher=teacher, kd_weight=args.peso_kd,
+                        temperature=args.temperatura, mask_weight=args.peso_kd_mascara,
+                        rule_area=area if args.mu_max > 0 else None, rule_k=args.regra_k,
+                        rule_C=args.regra_C, rule_lam=args.regra_lambda)
     opt = make_optimizer(model, lr=args.lr)
 
     # Retomar um treino interrompido.
@@ -147,7 +228,8 @@ def main(argv=None):
     elif (run_dir / "historico.csv").exists():
         (run_dir / "historico.csv").unlink()   # treino novo: histórico novo
 
-    config = vars(args) | {"dispositivo_usado": str(device),
+    config = vars(args) | extra | {"etapa": 2 if stage2 else 1,
+                                   "dispositivo_usado": str(device),
                            "imagens_treino": len(train_ds),
                            "passos_por_epoca": steps_per_epoch,
                            "passos_total": total_steps}
@@ -163,9 +245,12 @@ def main(argv=None):
             if n >= steps_per_epoch:
                 break
             lr = lr_schedule(opt, step, total_steps, args.aquecimento, args.lr)
+            if stage2 is not None:
+                stage2.mu = mu_schedule(step, total_steps, args.mu_max, args.mu_inicio)
             losses = train_step(model, opt, images, targets, device,
                                 consistency=consistency,
-                                consistency_weight=args.peso_consistencia)
+                                consistency_weight=args.peso_consistencia,
+                                stage2=stage2)
             for k, v in losses.items():
                 if isinstance(v, float):
                     sums[k] = sums.get(k, 0.0) + v
@@ -198,15 +283,14 @@ def main(argv=None):
                         "val_referencia": s_ref, "val_professor": s_prof,
                         "config": config}, run_dir / "melhor.pt")
         row["melhor"] = int(improved)
-        hist = run_dir / "historico.csv"
-        new = not hist.exists()
-        with open(hist, "a", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=list(row))
-            if new:
-                w.writeheader()
-            w.writerow(row)
+        append_history(run_dir / "historico.csv", row)
         cons = (f"  consistência {row['loss_consistencia']:.4f}"
                 if "loss_consistencia" in row else "")
+        if "loss_kd" in row:
+            cons += f"  destilação {row['loss_kd']:.4f}"
+        if "loss_regra1" in row:
+            cons += (f"  regra1 {row['loss_regra1']:.4f} (satisfeita "
+                     f"{row['regra1_satisfeita']:.2f}, mu {row['mu']:.2f})")
         print(f"Época {epoch}: perda {row['total']:.3f}  máscara {row['loss_mask']:.3f}"
               f"{cons}  ({row['tempo_s']} s)\n"
               f"  validação x referência: {format_summary(s_ref)}\n"
