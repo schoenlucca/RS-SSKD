@@ -29,15 +29,73 @@ perda da etapa 1 do aluno:
 
 Como no artigo, a perda supervisionada (aqui, a do professor TEBAKA) usa só
 a imagem original; as imagens transformadas entram só na consistência.
+
+Na etapa 2 (parte 6c), o passo recebe também um `Stage2`, e a perda segue a
+equação 16 de Harmon et al. (2022), somada à auto-destilação do RS-SSKD:
+
+    L = (1 - mu) * L_classificação        (copas do TEBAKA)
+        + demais perdas do Mask R-CNN      (caixas, máscaras, RPN; TEBAKA)
+        + mu * L_regra1                    (professor por regras, Harmon)
+        + beta * L_auto-destilação         (aluno da etapa 1 congelado)
+        + lambda * consistência            (como na etapa 1)
+
+Em Harmon, (1 - mu) multiplica só a classificação: é a cabeça em que a
+regra age; as outras perdas continuam inteiras. mu cresce com o passo
+(mu_schedule), para a regra só pesar depois que o aluno já aprendeu o
+básico: o professor das regras é o próprio aluno corrigido, então ele só é
+bom quando o aluno já é razoável.
 """
 
 from __future__ import annotations
 
 import math
+from contextlib import ExitStack
+from dataclasses import dataclass
 
 import torch
 
 from .consistency import capture_objectness, choose_transforms, consistency_loss
+from .distill import capture_roi, distillation_loss
+from .rules import rules_loss_from_capture
+
+
+@dataclass
+class Stage2:
+    """Configuração da etapa 2 para um passo de treino.
+
+    teacher:       aluno da etapa 1 congelado (distill.freeze); None = sem
+                   auto-destilação.
+    kd_weight:     beta, peso da auto-destilação.
+    temperature:   T da KL (4, como no RS-SSKD).
+    mask_weight:   peso da KL das máscaras dentro da auto-destilação.
+    mu:            peso da regra neste passo (vem de mu_schedule).
+    rule_area:     área de referência da regra 1 (rules.reference_area);
+                   None = sem regra.
+    rule_k, rule_C, rule_lam: parâmetros da regra (k, C e lambda de Harmon).
+    """
+
+    teacher: torch.nn.Module | None = None
+    kd_weight: float = 1.0
+    temperature: float = 4.0
+    mask_weight: float = 1.0
+    mu: float = 0.0
+    rule_area: float | None = None
+    rule_k: float = 5.0
+    rule_C: float = 1.0
+    rule_lam: float = 1.0
+
+
+def mu_schedule(step: int, total_steps: int, mu_max: float,
+                start_frac: float = 0.0) -> float:
+    """mu da equação 16 de Harmon: "uma função do número do passo em [0, 1]".
+
+    Fica em 0 até start_frac do treino e sobe em linha reta até mu_max no
+    último passo. Com start_frac = 0, a subida começa no primeiro passo.
+    """
+    start = start_frac * total_steps
+    if step <= start or total_steps <= start:
+        return 0.0
+    return min(mu_max, mu_max * (step - start) / max(1.0, total_steps - start))
 
 
 def pick_device(name: str = "auto") -> torch.device:
@@ -107,7 +165,7 @@ def to_device(images, targets, device):
 
 def train_step(model, optimizer, images, targets, device,
                max_grad_norm: float = 10.0, consistency: str | None = None,
-               consistency_weight: float = 1.0) -> dict:
+               consistency_weight: float = 1.0, stage2: Stage2 | None = None) -> dict:
     """Um passo de treino. Devolve as perdas (números) e a perda total.
 
     consistency:        None (desligada), "artigo" (as 3 transformações do
@@ -115,21 +173,47 @@ def train_step(model, optimizer, images, targets, device,
                         lista de nomes; ver choose_transforms.
     consistency_weight: o lambda que multiplica a consistência (1 no artigo).
 
+    stage2:             None na etapa 1; um Stage2 na etapa 2.
+
     Além das 5 perdas do Mask R-CNN, devolve "loss_consistencia" (sem o
-    lambda) e "cons_<transformação>" para cada transformação usada.
+    lambda) e "cons_<transformação>" para cada transformação usada; na
+    etapa 2, também "loss_kd" (sem o beta), "kd_cls", "kd_mask", "mu",
+    "loss_regra1" (sem o mu) e "regra1_satisfeita".
 
     Se alguma perda virar infinita ou NaN (sinal de treino instável), o passo
     é pulado em vez de estragar os pesos, e "pulado" vem True.
     """
     model.train()
     images, targets = to_device(images, targets, device)
-    if consistency:
-        with capture_objectness(model) as cap:
-            losses = model(images, targets)        # perda do professor TEBAKA
-    else:
-        cap, losses = {}, model(images, targets)
-    total = torch.stack(list(losses.values())).sum()
+    use_roi = stage2 is not None and (stage2.teacher is not None
+                                      or (stage2.rule_area is not None and stage2.mu > 0))
+    # Os ganchos só escutam o passo normal; a consistência roda depois,
+    # fora deles, para não sobrescrever o que foi guardado.
+    with ExitStack() as stack:
+        cap = stack.enter_context(capture_objectness(model)) if consistency else {}
+        roi = stack.enter_context(capture_roi(model)) if use_roi else {}
+        losses = model(images, targets)            # perda do professor TEBAKA
     out = {k: float(v.detach()) for k, v in losses.items()}
+    if stage2 is not None:
+        # Equação 16 de Harmon: (1 - mu) só na classificação.
+        losses = dict(losses)
+        losses["loss_classifier"] = (1 - stage2.mu) * losses["loss_classifier"]
+    total = torch.stack(list(losses.values())).sum()
+
+    if stage2 is not None and stage2.teacher is not None:
+        kd, parts = distillation_loss(roi, stage2.teacher, stage2.temperature,
+                                      stage2.mask_weight)
+        total = total + stage2.kd_weight * kd
+        out["loss_kd"] = float(kd.detach())
+        out.update(parts)
+    if stage2 is not None and stage2.rule_area is not None and stage2.mu > 0:
+        rule, parts = rules_loss_from_capture(roi, stage2.rule_area, stage2.rule_k,
+                                              stage2.rule_C, stage2.rule_lam)
+        total = total + stage2.mu * rule
+        out["loss_regra1"] = parts["regra1"]
+        out["regra1_satisfeita"] = parts["regra1_satisfeita"]
+    if stage2 is not None:
+        out["mu"] = stage2.mu
 
     if consistency:
         # As imagens do lote têm o mesmo tamanho: empilhamos num tensor só.

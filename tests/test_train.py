@@ -243,3 +243,51 @@ def test_comparacao_dos_treinos(tmp_path):
     md = (tmp_path / "saidas" / "comparacao.md").read_text(encoding="utf-8")
     assert "| lambda0 | 0 | 1 | 0.45 |" in md and "—" in md
     assert (tmp_path / "saidas" / "comparacao.png").exists()
+
+
+def test_mu_cresce_com_o_passo():
+    from rsskd.train import mu_schedule
+
+    assert mu_schedule(0, 100, 0.5) == 0.0
+    assert mu_schedule(50, 100, 0.5) == pytest.approx(0.25)
+    assert mu_schedule(100, 100, 0.5) == pytest.approx(0.5)
+    # Com start_frac = 0,5: zero na primeira metade, depois sobe até 0,5.
+    assert mu_schedule(40, 100, 0.5, start_frac=0.5) == 0.0
+    assert mu_schedule(75, 100, 0.5, start_frac=0.5) == pytest.approx(0.25)
+
+
+def test_passo_da_etapa_2_combina_as_perdas():
+    # Aluno pequeno, sem pré-treino; o professor da etapa 1 é outro modelo
+    # congelado. Com lr = 0 os pesos não mudam, e dá para conferir a soma.
+    from rsskd.detector import build_student
+    from rsskd.distill import freeze
+    from rsskd.train import Stage2
+
+    S = 64
+    torch.manual_seed(0)
+    professor = freeze(build_student(pretrained_backbone=False, image_size=S))
+    torch.manual_seed(1)
+    m = build_student(pretrained_backbone=False, image_size=S)
+    masks = torch.zeros(1, S, S, dtype=torch.uint8)
+    masks[0, 10:30, 10:30] = 1
+    alvo = {"boxes": torch.tensor([[10.0, 10, 30, 30]]),
+            "labels": torch.ones(1, dtype=torch.int64), "masks": masks}
+    opt = make_optimizer(m, lr=0.0)
+    imgs = [torch.randn(6, S, S), torch.randn(6, S, S)]
+
+    cfg = Stage2(teacher=professor, kd_weight=2.0, mu=0.3, rule_area=150.0)
+    out = train_step(m, opt, imgs, [alvo, alvo], "cpu", consistency="flip",
+                     consistency_weight=3.0, stage2=cfg)
+    for k in ["loss_kd", "kd_cls", "kd_mask", "loss_regra1", "regra1_satisfeita",
+              "loss_consistencia", "mu"]:
+        assert k in out
+    outras = sum(out[k] for k in ["loss_box_reg", "loss_mask", "loss_objectness",
+                                  "loss_rpn_box_reg"])
+    esperado = ((1 - 0.3) * out["loss_classifier"] + outras + 0.3 * out["loss_regra1"]
+                + 2.0 * out["loss_kd"] + 3.0 * out["loss_consistencia"])
+    assert out["total"] == pytest.approx(esperado, rel=1e-4)
+    assert out["loss_kd"] > 0 and out["loss_regra1"] > 0
+
+    # mu = 0 desliga a regra; sem professor, não há destilação.
+    out = train_step(m, opt, imgs, [alvo, alvo], "cpu", stage2=Stage2(mu=0.0, rule_area=150.0))
+    assert "loss_regra1" not in out and "loss_kd" not in out and out["mu"] == 0.0
