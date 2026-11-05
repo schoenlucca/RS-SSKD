@@ -22,6 +22,13 @@ Saídas em saidas/:
 
 Treinos antigos, sem as colunas de validação (de antes da parte 5b),
 entram com as métricas em branco: avalie-os com scripts/evaluate_student.py.
+
+**Várias sementes (parte 7b).** Treinos com o mesmo nome e o sufixo _s<n>
+(lambda100_s0, lambda100_s1, ..., como os que scripts/run_seeds.py cria)
+viram uma linha só, com a média e o desvio-padrão de cada métrica entre as
+sementes ("0,52 ± 0,02") e o número de sementes na coluna n. O desvio é o
+amostral (divide por n - 1). Com --sem-agrupar, cada semente fica na sua
+linha.
 """
 
 from __future__ import annotations
@@ -29,6 +36,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
+import statistics
 import sys
 from pathlib import Path
 
@@ -111,9 +120,52 @@ def teacher_baseline(dataset_dir, pseudo_dir) -> dict | None:
     return out
 
 
+SEED_SUFFIX = re.compile(r"^(.*)_s(\d+)$")
+
+
+def group_seeds(rows: list[dict]) -> list[dict]:
+    """Junta as linhas dos treinos <nome>_s<n> numa linha <nome> por grupo.
+
+    Nas colunas numéricas, a linha do grupo traz a média, e a coluna
+    <coluna>_dp traz o desvio-padrão amostral (0 com uma semente só). A
+    época escolhida e o tempo também viram médias. Treinos sem o sufixo
+    passam como estão, com n = 1.
+    """
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for r in rows:
+        m = SEED_SUFFIX.match(str(r["treino"]))
+        key = m.group(1) if m else str(r["treino"])
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(r)
+
+    out = []
+    for key in order:
+        members = groups[key]
+        if len(members) == 1 and not SEED_SUFFIX.match(str(members[0]["treino"])):
+            out.append(members[0] | {"n": 1})
+            continue
+        row: dict = {"treino": key, "n": len(members)}
+        for col in members[0]:
+            if col == "treino":
+                continue
+            vals = [m.get(col) for m in members]
+            if all(isinstance(v, (int, float)) for v in vals):
+                nums = [float(v) for v in vals if v is not None]
+                row[col] = statistics.mean(nums)
+                row[f"{col}_dp"] = statistics.stdev(nums) if len(nums) > 1 else 0.0
+            else:
+                row[col] = vals[0] if len(set(map(str, vals))) == 1 else "vários"
+        out.append(row)
+    return out
+
+
 def to_markdown(rows: list[dict]) -> str:
     """Tabela em Markdown. As métricas vão com 2 casas (erro de contagem, 1)."""
-    cols = [("treino", "Treino", None), ("etapa", "Etapa", "g"), ("lambda", "λ", "g"),
+    cols = [("treino", "Treino", None), ("n", "n", "g"), ("etapa", "Etapa", "g"),
+            ("lambda", "λ", "g"),
             ("mu_max", "μ", "g"), ("peso_kd", "β", "g"),
             ("epoca_escolhida", "Época", "g"), ("ref_precisao", "P", ".2f"),
             ("ref_revocacao", "R", ".2f"), ("ref_f1", "F1", ".2f"),
@@ -122,15 +174,21 @@ def to_markdown(rows: list[dict]) -> str:
             ("ref_area_mae", "MAE área (px)", ".0f"), ("ref_area_kl", "KL área", ".2f"),
             ("prof_f1", "F1 x professor", ".2f")]
 
-    def cell(v, spec):
+    def cell(r, k, spec):
+        v = r.get(k, "")
         if v == "" or v is None:
             return "—"
-        return format(v, spec) if spec and isinstance(v, (int, float)) else str(v)
+        if not (spec and isinstance(v, (int, float))):
+            return str(v)
+        dp = r.get(f"{k}_dp")
+        if k.startswith(("ref_", "prof_")) and isinstance(dp, float) and r.get("n", 1) > 1:
+            return f"{format(v, spec)} ± {format(dp, spec)}"
+        return format(v, spec)
 
     lines = ["| " + " | ".join(h for _, h, _ in cols) + " |",
              "|" + "---|" * len(cols)]
     for r in rows:
-        lines.append("| " + " | ".join(cell(r.get(k, ""), spec) for k, _, spec in cols) + " |")
+        lines.append("| " + " | ".join(cell(r, k, spec) for k, _, spec in cols) + " |")
     return "\n".join(lines) + "\n"
 
 
@@ -165,6 +223,8 @@ def main(argv=None):
                     help="conjunto AgML, para a linha do professor")
     ap.add_argument("--copas", default="data/pseudo/agml")
     ap.add_argument("--saida", default="saidas")
+    ap.add_argument("--sem-agrupar", action="store_true",
+                    help="não junta as sementes (_s0, _s1, ...) numa linha só")
     args = ap.parse_args(argv)
 
     root = Path(args.pasta_runs)
@@ -175,6 +235,8 @@ def main(argv=None):
         raise SystemExit(f"Nenhum treino encontrado em {root}/")
 
     rows = [summarize(r) for r in runs]
+    if not args.sem_agrupar:
+        rows = group_seeds(rows)
     teacher = teacher_baseline(args.pasta, args.copas)
     if teacher:
         rows.insert(0, teacher)
@@ -182,7 +244,8 @@ def main(argv=None):
     out = Path(args.saida)
     out.mkdir(parents=True, exist_ok=True)
     with open(out / "comparacao.csv", "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[-1]))
+        fields = list(dict.fromkeys(k for r in rows for k in r))
+        w = csv.DictWriter(f, fieldnames=fields, restval="")
         w.writeheader()
         w.writerows(rows)
     md = to_markdown(rows)

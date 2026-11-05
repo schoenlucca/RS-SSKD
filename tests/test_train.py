@@ -241,7 +241,7 @@ def test_comparacao_dos_treinos(tmp_path):
     assert por_nome["antigo"]["ref_f1"] == ""          # sem validação: em branco
     assert por_nome["lambda0"]["tempo_min"] == 3
     md = (tmp_path / "saidas" / "comparacao.md").read_text(encoding="utf-8")
-    assert "| lambda0 | 1 | 0 | 0 | 0 | 1 | 0.45 |" in md and "—" in md
+    assert "| lambda0 | 1 | 1 | 0 | 0 | 0 | 1 | 0.45 |" in md and "—" in md
     assert (tmp_path / "saidas" / "comparacao.png").exists()
 
 
@@ -319,3 +319,39 @@ def test_treino_da_etapa_2(dados_falsos, tmp_path):
     assert {"loss_kd", "kd_cls", "kd_mask", "loss_regra1", "mu"} <= set(linhas[0])
     # mu sobe com o passo: 0 no 1o passo, metade no 2o (média de 1 passo/época).
     assert [float(r["mu"]) for r in linhas] == [0.0, 0.25]
+
+
+def test_sementes_viram_uma_linha_com_media_e_desvio(tmp_path):
+    from compare_runs import group_seeds, to_markdown
+
+    def linha(nome, f1):
+        return {"treino": nome, "etapa": 1, "lambda": 1, "epoca_escolhida": 3,
+                "ref_f1": f1, "prof_f1": 0.8, "ref_precisao": f1}
+
+    rows = group_seeds([linha("a_s0", 0.40), linha("a_s1", 0.50),
+                        linha("b", 0.60), linha("c_s0", 0.30)])
+    assert [r["treino"] for r in rows] == ["a", "b", "c"]
+    a = rows[0]
+    assert a["n"] == 2 and a["ref_f1"] == pytest.approx(0.45)
+    assert a["ref_f1_dp"] == pytest.approx(0.0707, abs=1e-4)      # desvio amostral
+    assert rows[1]["n"] == 1 and rows[2]["n"] == 1 and rows[2]["ref_f1_dp"] == 0.0
+    md = to_markdown(rows)
+    assert "0.45 ± 0.07" in md and "| b | 1 |" in md
+
+
+def test_rodar_varias_sementes(dados_falsos, tmp_path):
+    from run_seeds import main as rodar
+
+    dados, pseudo, entrada = dados_falsos
+    comum = ["--pasta", str(dados), "--copas", str(pseudo), "--entrada", str(entrada),
+             "--lote", "1", "--sem-pretreino", "--dispositivo", "cpu",
+             "--saida", str(tmp_path / "runs"), "--epocas", "1",
+             "--max-passos-por-epoca", "1", "--paciencia", "0", "--peso-consistencia", "0"]
+    runs = rodar(["--nome", "x", "--sementes", "0", "1", "--"] + comum)
+    assert [r.name for r in runs] == ["x_s0", "x_s1"]
+    cfg = json.loads((runs[1] / "config.json").read_text(encoding="utf-8"))
+    assert cfg["semente"] == 1
+    # Rodar de novo não refaz os treinos já terminados.
+    antes = (runs[0] / "melhor.pt").stat().st_mtime
+    rodar(["--nome", "x", "--sementes", "0", "--"] + comum)
+    assert (runs[0] / "melhor.pt").stat().st_mtime == antes
