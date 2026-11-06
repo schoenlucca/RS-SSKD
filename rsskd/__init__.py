@@ -26,6 +26,8 @@ Módulos:
              from rsskd.rules import rules_loss_from_capture, reference_area
     predictions: previsões em arquivo, para comparar métodos (ex.: o SAM):
              from rsskd.predictions import PredictionStore
+    tiling:  previsão em ortomosaicos por blocos sobrepostos, com costura:
+             from rsskd.tiling import predict_large
 """
 
 from .losses import base_loss, cam_consistency, distill_loss, make_teacher, t_flip, t_scale
