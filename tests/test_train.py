@@ -355,3 +355,27 @@ def test_rodar_varias_sementes(dados_falsos, tmp_path):
     antes = (runs[0] / "melhor.pt").stat().st_mtime
     rodar(["--nome", "x", "--sementes", "0", "--"] + comum)
     assert (runs[0] / "melhor.pt").stat().st_mtime == antes
+
+
+def test_exportar_previsoes_do_aluno(dados_falsos, tmp_path):
+    # Treina 1 passo, exporta as previsões da validação e avalia a pasta.
+    from evaluate_predictions import main as avaliar
+    from export_predictions import main as exportar
+    from train_student import main as treinar
+
+    from rsskd.predictions import PredictionStore
+
+    dados, pseudo, entrada = dados_falsos
+    run = treinar(["--nome", "exp", "--pasta", str(dados), "--copas", str(pseudo),
+                   "--entrada", str(entrada), "--lote", "1", "--sem-pretreino",
+                   "--dispositivo", "cpu", "--saida", str(tmp_path / "runs"), "--epocas", "1",
+                   "--max-passos-por-epoca", "1", "--paciencia", "0",
+                   "--peso-consistencia", "0"])
+    pasta = exportar(["--run", str(run), "--divisoes", "val", "--dispositivo", "cpu",
+                      "--saida", str(tmp_path / "prev")])
+    store = PredictionStore(pasta)
+    assert store.indices("val") == [0, 1]
+    assert "exp" in store.info()["metodo"] and len(store.info()["imagens"]["val"]) == 2
+    linhas = avaliar([str(pasta), "--split", "val", "--pasta", str(dados),
+                      "--saida", str(tmp_path / "saidas")])
+    assert "f1" in linhas[0]

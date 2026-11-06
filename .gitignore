@@ -24,3 +24,6 @@ Thumbs.db
 
 # Figuras e resultados gerados pelos scripts
 saidas/
+
+# Previsões exportadas (scripts/export_predictions.py)
+previsoes/
