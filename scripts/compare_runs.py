@@ -25,10 +25,11 @@ entram com as métricas em branco: avalie-os com scripts/evaluate_student.py.
 
 **Várias sementes (parte 7b).** Treinos com o mesmo nome e o sufixo _s<n>
 (lambda100_s0, lambda100_s1, ..., como os que scripts/run_seeds.py cria)
-viram uma linha só, com a média e o desvio-padrão de cada métrica entre as
-sementes ("0,52 ± 0,02") e o número de sementes na coluna n. O desvio é o
-amostral (divide por n - 1). Com --sem-agrupar, cada semente fica na sua
-linha.
+viram uma linha só, chamada <nome>_s*, com a média e o desvio-padrão de cada
+métrica entre as sementes ("0,52 ± 0,02") e o número de sementes na coluna
+n. O desvio é o amostral (divide por n - 1). Um treino sem o sufixo nunca
+entra no grupo, mesmo com o mesmo nome (lambda1 e lambda1_s0 são treinos
+diferentes). Com --sem-agrupar, cada semente fica na sua linha.
 """
 
 from __future__ import annotations
@@ -124,18 +125,19 @@ SEED_SUFFIX = re.compile(r"^(.*)_s(\d+)$")
 
 
 def group_seeds(rows: list[dict]) -> list[dict]:
-    """Junta as linhas dos treinos <nome>_s<n> numa linha <nome> por grupo.
+    """Junta as linhas dos treinos <nome>_s<n> numa linha <nome>_s* por grupo.
 
     Nas colunas numéricas, a linha do grupo traz a média, e a coluna
     <coluna>_dp traz o desvio-padrão amostral (0 com uma semente só). A
     época escolhida e o tempo também viram médias. Treinos sem o sufixo
-    passam como estão, com n = 1.
+    passam como estão, com n = 1, e nunca se misturam a um grupo de
+    sementes de mesmo nome.
     """
-    groups: dict[str, list[dict]] = {}
-    order: list[str] = []
+    groups: dict[tuple[str, bool], list[dict]] = {}
+    order: list[tuple[str, bool]] = []
     for r in rows:
         m = SEED_SUFFIX.match(str(r["treino"]))
-        key = m.group(1) if m else str(r["treino"])
+        key = (m.group(1), True) if m else (str(r["treino"]), False)
         if key not in groups:
             groups[key] = []
             order.append(key)
@@ -143,11 +145,12 @@ def group_seeds(rows: list[dict]) -> list[dict]:
 
     out = []
     for key in order:
+        name, seeded = key
         members = groups[key]
-        if len(members) == 1 and not SEED_SUFFIX.match(str(members[0]["treino"])):
-            out.append(members[0] | {"n": 1})
+        if not seeded:
+            out.extend(m | {"n": 1} for m in members)
             continue
-        row: dict = {"treino": key, "n": len(members)}
+        row: dict = {"treino": f"{name}_s*", "n": len(members)}
         for col in members[0]:
             if col == "treino":
                 continue

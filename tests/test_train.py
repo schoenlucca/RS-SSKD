@@ -329,14 +329,16 @@ def test_sementes_viram_uma_linha_com_media_e_desvio(tmp_path):
                 "ref_f1": f1, "prof_f1": 0.8, "ref_precisao": f1}
 
     rows = group_seeds([linha("a_s0", 0.40), linha("a_s1", 0.50),
-                        linha("b", 0.60), linha("c_s0", 0.30)])
-    assert [r["treino"] for r in rows] == ["a", "b", "c"]
+                        linha("b", 0.60), linha("c_s0", 0.30), linha("a", 0.99)])
+    # "a" (sem sufixo) é outro treino: não entra no grupo das sementes de a.
+    assert [r["treino"] for r in rows] == ["a_s*", "b", "c_s*", "a"]
+    assert rows[3]["ref_f1"] == 0.99 and rows[3]["n"] == 1
     a = rows[0]
     assert a["n"] == 2 and a["ref_f1"] == pytest.approx(0.45)
     assert a["ref_f1_dp"] == pytest.approx(0.0707, abs=1e-4)      # desvio amostral
     assert rows[1]["n"] == 1 and rows[2]["n"] == 1 and rows[2]["ref_f1_dp"] == 0.0
     md = to_markdown(rows)
-    assert "0.45 ± 0.07" in md and "| b | 1 |" in md
+    assert "| a_s* | 2 |" in md and "0.45 ± 0.07" in md and "| b | 1 |" in md
 
 
 def test_rodar_varias_sementes(dados_falsos, tmp_path):
