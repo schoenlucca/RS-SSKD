@@ -56,6 +56,22 @@ Saídas em runs/<nome>/ (pasta ignorada pelo git):
                     professor) e se foi o melhor até então
     ultimo.pt       pesos do modelo e estado do otimizador (~500 MB)
     melhor.pt       pesos do melhor modelo pelo critério (~250 MB)
+    melhor_referencia.pt
+                    pesos da época de maior F1 contra a referência, qualquer
+                    que seja o critério. SÓ PARA DIAGNÓSTICO: escolher um
+                    modelo por ele usa rótulos humanos; se for usado no
+                    relatório, isso tem de ser declarado (~250 MB)
+    epocas/epoca_NN.pt
+                    com --salvar-epocas: os pesos de cada época pedida
+                    (~250 MB cada), para escolher depois, por exemplo, o aluno
+                    de uma época inicial como professor da etapa 2
+
+**Por que guardar épocas.** Nos treinos da etapa 1, o F1 contra a
+referência sobe nas primeiras épocas e depois cai, enquanto o F1 contra o
+professor só sobe: o aluno aprende primeiro o que é uma copa e depois passa a
+decorar os erros do TEBAKA (o fenômeno de "early learning" com rótulos
+ruidosos). O aluno de uma época inicial pode ser um professor melhor para a
+etapa 2 do que o da última.
 """
 
 from __future__ import annotations
@@ -112,6 +128,8 @@ def parse_args(argv=None):
     ap.add_argument("--criterio", default="professor",
                     choices=["professor", "referencia", "nenhum"],
                     help="como escolher o melhor modelo na validação")
+    ap.add_argument("--salvar-epocas", type=int, nargs="*", default=None,
+                    help="guarda os pesos destas épocas em epocas/ (sem números: todas)")
     ap.add_argument("--paciencia", type=int, default=6,
                     help="épocas sem melhorar antes de parar (0 desliga)")
     # Etapa 2
@@ -216,6 +234,7 @@ def main(argv=None):
     # Retomar um treino interrompido.
     start_epoch, step = 0, 0
     best_score, best_epoch = -1.0, -1
+    best_ref = -1.0
     ckpt_path = run_dir / "ultimo.pt"
     if args.continuar and ckpt_path.exists():
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
@@ -224,6 +243,7 @@ def main(argv=None):
         start_epoch, step = ckpt["epoca"] + 1, ckpt["passo"]
         torch.set_rng_state(ckpt["rng"])
         best_score, best_epoch = ckpt.get("melhor_score", -1.0), ckpt.get("melhor_epoca", -1)
+        best_ref = ckpt.get("melhor_ref_score", -1.0)
         print(f"Retomando de {ckpt_path}, época {start_epoch}")
     elif (run_dir / "historico.csv").exists():
         (run_dir / "historico.csv").unlink()   # treino novo: histórico novo
@@ -283,6 +303,21 @@ def main(argv=None):
                         "val_referencia": s_ref, "val_professor": s_prof,
                         "config": config}, run_dir / "melhor.pt")
         row["melhor"] = int(improved)
+
+        # Diagnóstico: a época de maior F1 contra a referência.
+        if s_ref["f1"] > best_ref:
+            best_ref = s_ref["f1"]
+            torch.save({"modelo": model.state_dict(), "epoca": epoch,
+                        "criterio": "referencia (diagnóstico)", "score": best_ref,
+                        "val_referencia": s_ref, "val_professor": s_prof,
+                        "config": config}, run_dir / "melhor_referencia.pt")
+        # Épocas pedidas em --salvar-epocas (lista vazia = todas).
+        if args.salvar_epocas is not None and (not args.salvar_epocas
+                                               or epoch in args.salvar_epocas):
+            (run_dir / "epocas").mkdir(exist_ok=True)
+            torch.save({"modelo": model.state_dict(), "epoca": epoch,
+                        "val_referencia": s_ref, "val_professor": s_prof,
+                        "config": config}, run_dir / "epocas" / f"epoca_{epoch:02d}.pt")
         append_history(run_dir / "historico.csv", row)
         cons = (f"  consistência {row['loss_consistencia']:.4f}"
                 if "loss_consistencia" in row else "")
@@ -300,7 +335,7 @@ def main(argv=None):
         torch.save({"modelo": model.state_dict(), "otimizador": opt.state_dict(),
                     "epoca": epoch, "passo": step, "rng": torch.get_rng_state(),
                     "melhor_score": best_score, "melhor_epoca": best_epoch,
-                    "config": config}, ckpt_path)
+                    "melhor_ref_score": best_ref, "config": config}, ckpt_path)
 
         if (args.criterio != "nenhum" and args.paciencia > 0
                 and epoch - best_epoch >= args.paciencia):

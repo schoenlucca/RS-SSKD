@@ -55,7 +55,8 @@ def load_student(run_dir: Path, which: str, device):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True, help="pasta do treino (ex.: runs/lambda1)")
-    ap.add_argument("--modelo", default="melhor", choices=["melhor", "ultimo"])
+    ap.add_argument("--modelo", default="melhor",
+                    help="melhor, ultimo, melhor_referencia ou epocas/epoca_NN")
     ap.add_argument("--split", default="val", choices=["val", "test"])
     ap.add_argument("--limiar-score", type=float, default=0.5,
                     help="confiança mínima para uma detecção virar copa")
@@ -77,7 +78,7 @@ def main(argv=None):
     print(f"Aluno x referência: {format_summary(s_ref)}")
     print(f"Aluno x professor:  {format_summary(s_prof)}")
 
-    tag = f"avaliacao_{args.split}_{args.modelo}"
+    tag = f"avaliacao_{args.split}_{args.modelo.replace('/', '_')}"
     (run_dir / f"{tag}.json").write_text(json.dumps(
         {"modelo": args.modelo, "epoca": ckpt["epoca"], "split": args.split,
          "limiar_score": args.limiar_score, "aluno_x_referencia": s_ref,

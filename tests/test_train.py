@@ -381,3 +381,29 @@ def test_exportar_previsoes_do_aluno(dados_falsos, tmp_path):
     linhas = avaliar([str(pasta), "--split", "val", "--pasta", str(dados),
                       "--saida", str(tmp_path / "saidas")])
     assert "f1" in linhas[0]
+
+
+def test_salvar_epocas_e_melhor_da_referencia(dados_falsos, tmp_path):
+    from evaluate_student import main as avaliar
+    from train_student import main as treinar
+
+    dados, pseudo, entrada = dados_falsos
+    base = ["--pasta", str(dados), "--copas", str(pseudo), "--entrada", str(entrada),
+            "--lote", "1", "--sem-pretreino", "--dispositivo", "cpu",
+            "--saida", str(tmp_path / "runs"), "--epocas", "3",
+            "--max-passos-por-epoca", "1", "--paciencia", "0", "--peso-consistencia", "0"]
+    todas = treinar(["--nome", "todas", "--salvar-epocas"] + base)
+    assert sorted(p.name for p in (todas / "epocas").iterdir()) == [
+        "epoca_00.pt", "epoca_01.pt", "epoca_02.pt"]
+    ref = torch.load(todas / "melhor_referencia.pt", weights_only=False)
+    assert "diagnóstico" in ref["criterio"] and "f1" in ref["val_referencia"]
+
+    algumas = treinar(["--nome", "algumas", "--salvar-epocas", "1"] + base)
+    assert [p.name for p in (algumas / "epocas").iterdir()] == ["epoca_01.pt"]
+    sem = treinar(["--nome", "sem"] + base)
+    assert not (sem / "epocas").exists() and (sem / "melhor_referencia.pt").exists()
+
+    # Uma época salva pode ser avaliada (e usada como professor) como as outras.
+    s_ref, _ = avaliar(["--run", str(algumas), "--modelo", "epocas/epoca_01",
+                        "--dispositivo", "cpu", "--n-figura", "1"])
+    assert "f1" in s_ref and (algumas / "avaliacao_val_epocas_epoca_01.json").exists()

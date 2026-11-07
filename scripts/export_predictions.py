@@ -32,7 +32,8 @@ from rsskd.train import load_checkpoint, pick_device  # noqa: E402
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True, help="pasta do treino (ex.: runs/lambda100)")
-    ap.add_argument("--modelo", default="melhor", choices=["melhor", "ultimo"])
+    ap.add_argument("--modelo", default="melhor",
+                    help="melhor, ultimo, melhor_referencia ou epocas/epoca_NN")
     ap.add_argument("--divisoes", nargs="+", default=["val", "test"])
     ap.add_argument("--saida", default=None, help="padrão: previsoes/<nome do treino>")
     ap.add_argument("--limiar-score", type=float, default=0.5)
