@@ -35,6 +35,7 @@ from skimage.segmentation import find_boundaries  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rsskd.data import DEFAULT_DIR, AgmlTreeCrowns, mask_to_instances, match_instances  # noqa: E402
+from rsskd.paths import HINT_FOLDER, require  # noqa: E402
 from rsskd.predictions import PredictionStore  # noqa: E402
 
 
@@ -63,7 +64,9 @@ def parse_methods(items: list[str]) -> list[tuple[str, str]]:
 
 
 def figure(ds, methods, split, indices, path_base: Path) -> list[Path]:
-    stores = [(name, PredictionStore(folder)) for name, folder in methods]
+    stores = [(name, PredictionStore(require(folder, f"a pasta de previsões de {name}",
+                                             HINT_FOLDER)))
+              for name, folder in methods]
     cols = len(stores) + 2                                 # imagem + métodos + referência
     fig, ax = plt.subplots(len(indices), cols, figsize=(2.6 * cols, 2.7 * len(indices)),
                            squeeze=False)

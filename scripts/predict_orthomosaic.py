@@ -39,6 +39,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rsskd.inputs import InputSpec  # noqa: E402
+from rsskd.paths import require  # noqa: E402
 from rsskd.teacher import TebakaTeacher  # noqa: E402
 from rsskd.tiling import (  # noqa: E402
     TilePredictor, crown_table, model_tile_predictor, predict_large,
@@ -49,6 +50,10 @@ def read_bands(image: str | None, band_files: list[str] | None) -> tuple[np.ndar
     """Bandas (C, H, W) e o perfil do GeoTIFF (para gravar a saída alinhada)."""
     import rasterio
 
+    hint = ("Use o caminho do seu arquivo: os nomes dos exemplos (orto.tif, R.tif, ...) "
+            "são só ilustrações.")
+    for f in [image] if image else (band_files or []):
+        require(f, "a imagem", hint)
     if image:
         with rasterio.open(image) as src:
             return src.read(), dict(src.profile)

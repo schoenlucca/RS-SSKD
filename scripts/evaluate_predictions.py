@@ -29,6 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rsskd.data import DEFAULT_DIR, AgmlTreeCrowns, mask_to_instances  # noqa: E402
 from rsskd.evaluation import CrownMetrics, format_summary  # noqa: E402
+from rsskd.paths import HINT_FOLDER, require  # noqa: E402
 from rsskd.predictions import PredictionStore, check_against  # noqa: E402
 
 COLS = [("precisao", "P", ".2f"), ("revocacao", "R", ".2f"), ("f1", "F1", ".2f"),
@@ -56,6 +57,7 @@ def main(argv=None):
     refs = [mask_to_instances(ds[i].mask) for i in range(len(ds))]
     rows = []
     for folder in args.pastas:
+        require(folder, "a pasta de previsões", HINT_FOLDER)
         store = PredictionStore(folder)
         problems = check_against(store, args.split, ds)
         if problems:

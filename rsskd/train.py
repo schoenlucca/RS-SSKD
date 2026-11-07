@@ -48,6 +48,8 @@ bom quando o aluno já é razoável.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import math
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -106,7 +108,17 @@ def load_checkpoint(path, device: "str | torch.device" = "cpu"):
     """
     from .detector import build_student
     from .inputs import InputSpec
+    from .paths import checkpoints_near, require
 
+    path = Path(path)
+    if not path.exists():
+        runs = path.parent.parent
+        others = checkpoints_near(path) or (
+            sorted(d.name for d in runs.iterdir() if d.is_dir()) if runs.exists() else [])
+        require(path, "o modelo salvo",
+                "Confira o --run e o --modelo (melhor, ultimo, melhor_referencia ou "
+                "epocas/epoca_NN). Um treino novo grava melhor.pt ao fim da 1ª época.",
+                others)
     ckpt = torch.load(path, map_location=device, weights_only=False)
     cfg = ckpt["config"]
     spec = InputSpec.load(cfg["entrada"])

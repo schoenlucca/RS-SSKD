@@ -144,6 +144,10 @@ class InputSpec:
 
     @classmethod
     def load(cls, path: str | Path) -> "InputSpec":
+        from .paths import require
+
+        require(path, "a normalização da entrada",
+                "Rode antes: python scripts/compute_input_stats.py")
         info = json.loads(Path(path).read_text(encoding="utf-8"))
         return cls(**{k: v for k, v in info.items() if not k.startswith("_")})
 
