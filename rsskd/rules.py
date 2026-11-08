@@ -104,14 +104,33 @@ def rules_loss_from_capture(cap: dict, mu_area: float, k: float = 5.0,
     return loss, {"regra1": float(loss.detach()), "regra1_satisfeita": float(sat)}
 
 
+def check_area_stat(stat: str) -> str:
+    """Confere a estatística da área de referência: "mediana", "media" ou
+    "p<N>", um percentil entre 1 e 99 (ex.: "p90"). Devolve a mesma string."""
+    if stat in ("mediana", "media"):
+        return stat
+    if stat.startswith("p") and stat[1:].isdigit() and 1 <= int(stat[1:]) <= 99:
+        return stat
+    raise ValueError(f"Estatística de área desconhecida: {stat!r}. "
+                     "Use mediana, media ou p<N> (ex.: p90).")
+
+
 def reference_area(labels_iter, stat: str = "mediana") -> float:
-    """Área de referência mu_area: mediana (padrão) ou média das áreas das
-    caixas das copas, numa sequência de imagens de etiquetas (0 = fundo).
+    """Área de referência mu_area das caixas das copas, numa sequência de
+    imagens de etiquetas (0 = fundo).
+
+    stat: "mediana" (padrão), "media" (a de Harmon) ou "p<N>", o percentil N
+    (ex.: "p90"). Com a mediana, metade das copas do próprio TEBAKA fica
+    acima de mu_area por construção, e a regra pesa sobre copas normais;
+    um percentil alto põe o limite perto das copas grandes demais (em geral,
+    árvores vizinhas que o professor fundiu), que é o alvo da regra.
 
     Uso, com as copas do TEBAKA no treino:
         store = PseudoLabelStore("data/pseudo/agml")
         mu = reference_area(store.load("train", i) for i in store.indices("train"))
+        mu90 = reference_area((store.load("train", i) for i in ...), stat="p90")
     """
+    check_area_stat(stat)
     areas = []
     for labels in labels_iter:
         for sl in ndi.find_objects(labels):
@@ -119,4 +138,8 @@ def reference_area(labels_iter, stat: str = "mediana") -> float:
                 areas.append((sl[0].stop - sl[0].start) * (sl[1].stop - sl[1].start))
     if not areas:
         raise ValueError("Nenhuma copa para calcular a área de referência.")
-    return float(np.median(areas) if stat == "mediana" else np.mean(areas))
+    if stat == "mediana":
+        return float(np.median(areas))
+    if stat == "media":
+        return float(np.mean(areas))
+    return float(np.percentile(areas, int(stat[1:])))

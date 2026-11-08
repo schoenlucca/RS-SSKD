@@ -18,8 +18,10 @@ Na etapa 2, a perda do passo é (rsskd/train.py, Stage2):
     + beta * auto-destilação        (se --professor; beta = --peso-kd)
     + lambda * consistência         (como na etapa 1)
 O aluno novo começa dos pesos do ImageNet (born-again); --iniciar-do-professor
-começa dos pesos do professor. A área de referência da regra é a mediana
-(ou a média) das caixas das copas do TEBAKA no treino, calculada no início.
+começa dos pesos do professor. A área de referência da regra vem das caixas
+das copas do TEBAKA no treino, calculada no início: a mediana (padrão), a
+média ou um percentil (--estat-area p90), que deixa a regra pesar só sobre as
+copas grandes demais.
 
 O que acontece em cada época:
     1. as 476 imagens de treino são embaralhadas e lidas em lotes, cada uma
@@ -95,7 +97,7 @@ from rsskd.detector import build_student  # noqa: E402
 from rsskd.evaluation import CrownMetrics, evaluate_student, format_summary  # noqa: E402
 from rsskd.inputs import InputSpec  # noqa: E402
 from rsskd.distill import freeze  # noqa: E402
-from rsskd.rules import reference_area  # noqa: E402
+from rsskd.rules import check_area_stat, reference_area  # noqa: E402
 from rsskd.train import (  # noqa: E402
     Stage2, load_checkpoint, lr_schedule, make_optimizer, mu_schedule, pick_device,
     train_step,
@@ -147,13 +149,21 @@ def parse_args(argv=None):
                     help="fração do treino antes de mu começar a subir")
     ap.add_argument("--area-regra", type=float, default=None,
                     help="área de referência (px); padrão: calculada das copas do TEBAKA")
-    ap.add_argument("--estat-area", default="mediana", choices=["mediana", "media"])
+    ap.add_argument("--estat-area", default="mediana", type=_area_stat,
+                    help="mediana, media ou p<N>, um percentil das áreas (ex.: p90)")
     ap.add_argument("--regra-k", type=float, default=5.0)
     ap.add_argument("--regra-C", type=float, default=1.0)
     ap.add_argument("--regra-lambda", type=float, default=1.0)
     ap.add_argument("--max-passos-por-epoca", type=int, default=None,
                     help="limita os passos por época (para testes rápidos)")
     return ap.parse_args(argv)
+
+
+def _area_stat(value: str) -> str:
+    try:
+        return check_area_stat(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from e
 
 
 def append_history(path: Path, row: dict) -> None:

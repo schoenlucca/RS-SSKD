@@ -69,3 +69,20 @@ def test_area_de_referencia_das_copas():
     assert reference_area([a, b], stat="media") == pytest.approx(400)
     with pytest.raises(ValueError):
         reference_area([np.zeros((5, 5), np.int32)])
+
+
+def test_area_de_referencia_por_percentil():
+    from rsskd.rules import check_area_stat
+
+    imgs = []
+    for side in range(1, 11):                               # caixas de 1² a 10²
+        a = np.zeros((12, 12), np.int32)
+        a[:side, :side] = 1
+        imgs.append(a)
+    areas = [s * s for s in range(1, 11)]
+    assert reference_area(imgs, stat="p90") == pytest.approx(np.percentile(areas, 90))
+    assert reference_area(imgs, stat="p90") > reference_area(imgs)   # acima da mediana
+    assert check_area_stat("p95") == "p95"
+    for ruim in ("p0", "p100", "pxx", "moda"):
+        with pytest.raises(ValueError):
+            check_area_stat(ruim)
