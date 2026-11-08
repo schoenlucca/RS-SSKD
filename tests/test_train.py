@@ -407,3 +407,46 @@ def test_salvar_epocas_e_melhor_da_referencia(dados_falsos, tmp_path):
     s_ref, _ = avaliar(["--run", str(algumas), "--modelo", "epocas/epoca_01",
                         "--dispositivo", "cpu", "--n-figura", "1"])
     assert "f1" in s_ref and (algumas / "avaliacao_val_epocas_epoca_01.json").exists()
+
+
+
+def test_passo_com_gradscaler_desligado_igual_ao_normal():
+    # Na CPU não há float16; um GradScaler desligado tem de dar o mesmo passo
+    # que o caminho sem AMP (o caminho com AMP ligado só roda na GPU).
+    torch.manual_seed(0)
+    a, b = Parabola(), Parabola()
+    b.load_state_dict(a.state_dict())
+    oa, ob = make_optimizer(a, lr=0.1), make_optimizer(b, lr=0.1)
+    from rsskd.train import make_scaler
+
+    scaler = make_scaler(enabled=False)
+    ra = train_step(a, oa, [], [], "cpu")
+    rb = train_step(b, ob, [], [], "cpu", scaler=scaler)
+    assert ra["total"] == pytest.approx(rb["total"])
+    for pa, pb in zip(a.parameters(), b.parameters()):
+        assert torch.allclose(pa, pb)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="AMP precisa de GPU")
+def test_passo_com_amp_na_gpu():
+    torch.manual_seed(0)
+    m = Parabola().cuda()
+    opt = make_optimizer(m, lr=0.1)
+    from rsskd.train import make_scaler
+
+    scaler = make_scaler()
+    out = train_step(m, opt, [], [], "cuda", scaler=scaler)
+    assert not out["pulado"] and torch.isfinite(torch.tensor(out["total"]))
+
+
+def test_amp_na_cpu_avisa_e_treina_em_float32(dados_falsos, tmp_path, capsys):
+    from train_student import main
+
+    dados, pseudo, entrada = dados_falsos
+    run = main(["--nome", "amp", "--pasta", str(dados), "--copas", str(pseudo),
+                "--entrada", str(entrada), "--lote", "1", "--sem-pretreino",
+                "--dispositivo", "cpu", "--saida", str(tmp_path / "runs"), "--epocas", "1",
+                "--max-passos-por-epoca", "1", "--paciencia", "0",
+                "--peso-consistencia", "0", "--amp"])
+    assert "só funciona na GPU" in capsys.readouterr().out
+    assert json.loads((run / "config.json").read_text(encoding="utf-8"))["amp"] is False

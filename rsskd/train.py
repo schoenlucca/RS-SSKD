@@ -192,9 +192,19 @@ def to_device(images, targets, device):
     return images, targets
 
 
+def make_scaler(enabled: bool = True):
+    """GradScaler da precisão mista (AMP), na forma que a versão do torch tiver:
+    torch.amp.GradScaler("cuda") a partir do 2.3; antes (o servidor do LISA
+    tem o 2.0.1), torch.cuda.amp.GradScaler."""
+    if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+        return torch.amp.GradScaler("cuda", enabled=enabled)
+    return torch.cuda.amp.GradScaler(enabled=enabled)
+
+
 def train_step(model, optimizer, images, targets, device,
                max_grad_norm: float = 10.0, consistency: str | None = None,
-               consistency_weight: float = 1.0, stage2: Stage2 | None = None) -> dict:
+               consistency_weight: float = 1.0, stage2: Stage2 | None = None,
+               scaler=None) -> dict:
     """Um passo de treino. Devolve as perdas (números) e a perda total.
 
     consistency:        None (desligada), "artigo" (as 3 transformações do
@@ -204,16 +214,56 @@ def train_step(model, optimizer, images, targets, device,
 
     stage2:             None na etapa 1; um Stage2 na etapa 2.
 
+    scaler:             um GradScaler ligado (make_scaler) ativa a precisão mista
+                        (AMP): as contas da rede rodam em float16 na GPU, mais
+                        rápidas e com menos memória, e o GradScaler multiplica a
+                        perda antes do backward para os gradientes pequenos não
+                        virarem zero em float16 (e divide de volta antes do
+                        corte de gradiente e do passo). None = float32, como antes.
+
     Além das 5 perdas do Mask R-CNN, devolve "loss_consistencia" (sem o
     lambda) e "cons_<transformação>" para cada transformação usada; na
     etapa 2, também "loss_kd" (sem o beta), "kd_cls", "kd_mask", "mu",
     "loss_regra1" (sem o mu) e "regra1_satisfeita".
 
     Se alguma perda virar infinita ou NaN (sinal de treino instável), o passo
-    é pulado em vez de estragar os pesos, e "pulado" vem True.
+    é pulado em vez de estragar os pesos, e "pulado" vem True. Com AMP, o
+    GradScaler também pula sozinho os passos com gradiente infinito (e
+    diminui a escala).
     """
     model.train()
     images, targets = to_device(images, targets, device)
+    amp = scaler is not None and scaler.is_enabled()
+    with torch.autocast(device_type=torch.device(device).type, dtype=torch.float16,
+                        enabled=amp):
+        total, out = _step_losses(model, images, targets, consistency,
+                                  consistency_weight, stage2)
+
+    out["total"] = float(total.detach())
+    if not torch.isfinite(total):
+        optimizer.zero_grad(set_to_none=True)
+        out["pulado"] = True
+        return out
+    optimizer.zero_grad(set_to_none=True)
+    params = [p for p in model.parameters() if p.requires_grad]
+    if amp:
+        assert scaler is not None
+        scaler.scale(total).backward()
+        scaler.unscale_(optimizer)              # o corte vale para o gradiente real
+        torch.nn.utils.clip_grad_norm_(params, max_grad_norm)
+        scaler.step(optimizer)
+        scaler.update()
+    else:
+        total.backward()
+        torch.nn.utils.clip_grad_norm_(params, max_grad_norm)
+        optimizer.step()
+    out["pulado"] = False
+    return out
+
+
+def _step_losses(model, images, targets, consistency, consistency_weight,
+                 stage2: Stage2 | None) -> tuple[torch.Tensor, dict]:
+    """A perda total do passo e as parcelas (o miolo de train_step)."""
     use_roi = stage2 is not None and (stage2.teacher is not None
                                       or stage2.rule_area is not None)
     # Os ganchos só escutam o passo normal; a consistência roda depois,
@@ -227,12 +277,12 @@ def train_step(model, optimizer, images, targets, device,
         # Equação 16 de Harmon: (1 - mu) só na classificação.
         losses = dict(losses)
         losses["loss_classifier"] = (1 - stage2.mu) * losses["loss_classifier"]
-    total = torch.stack(list(losses.values())).sum()
+    total = torch.stack([v.float() for v in losses.values()]).sum()
 
     if stage2 is not None and stage2.teacher is not None:
         kd, parts = distillation_loss(roi, stage2.teacher, stage2.temperature,
                                       stage2.mask_weight)
-        total = total + stage2.kd_weight * kd
+        total = total + stage2.kd_weight * kd.float()
         out["loss_kd"] = float(kd.detach())
         out.update(parts)
     if stage2 is not None and stage2.rule_area is not None:
@@ -240,7 +290,7 @@ def train_step(model, optimizer, images, targets, device,
         # mostrar a regra desde o início; com mu = 0 ela não pesa.
         rule, parts = rules_loss_from_capture(roi, stage2.rule_area, stage2.rule_k,
                                               stage2.rule_C, stage2.rule_lam)
-        total = total + stage2.mu * rule
+        total = total + stage2.mu * rule.float()
         out["loss_regra1"] = parts["regra1"]
         out["regra1_satisfeita"] = parts["regra1_satisfeita"]
     if stage2 is not None:
@@ -250,19 +300,7 @@ def train_step(model, optimizer, images, targets, device,
         # As imagens do lote têm o mesmo tamanho: empilhamos num tensor só.
         cons, parts = consistency_loss(model, torch.stack(images),
                                        cap["objectness"], choose_transforms(consistency))
-        total = total + consistency_weight * cons
+        total = total + consistency_weight * cons.float()
         out["loss_consistencia"] = float(cons.detach())
         out.update({f"cons_{k}": v for k, v in parts.items()})
-
-    out["total"] = float(total.detach())
-    if not torch.isfinite(total):
-        optimizer.zero_grad(set_to_none=True)
-        out["pulado"] = True
-        return out
-    optimizer.zero_grad(set_to_none=True)
-    total.backward()
-    torch.nn.utils.clip_grad_norm_(
-        [p for p in model.parameters() if p.requires_grad], max_grad_norm)
-    optimizer.step()
-    out["pulado"] = False
-    return out
+    return total, out

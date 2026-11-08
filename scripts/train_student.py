@@ -99,7 +99,7 @@ from rsskd.inputs import InputSpec  # noqa: E402
 from rsskd.distill import freeze  # noqa: E402
 from rsskd.rules import check_area_stat, reference_area  # noqa: E402
 from rsskd.train import (  # noqa: E402
-    Stage2, load_checkpoint, lr_schedule, make_optimizer, mu_schedule, pick_device,
+    Stage2, load_checkpoint, lr_schedule, make_optimizer, make_scaler, mu_schedule, pick_device,
     train_step,
 )
 
@@ -154,6 +154,8 @@ def parse_args(argv=None):
     ap.add_argument("--regra-k", type=float, default=5.0)
     ap.add_argument("--regra-C", type=float, default=1.0)
     ap.add_argument("--regra-lambda", type=float, default=1.0)
+    ap.add_argument("--amp", action="store_true",
+                    help="precisão mista (float16) na GPU: mais rápido, menos memória")
     ap.add_argument("--max-passos-por-epoca", type=int, default=None,
                     help="limita os passos por época (para testes rápidos)")
     return ap.parse_args(argv)
@@ -197,6 +199,10 @@ def main(argv=None):
     device = pick_device(args.dispositivo)
     consistency = (None if args.consistencia == "nenhuma" or args.peso_consistencia == 0
                    else args.consistencia)
+    if args.amp and device.type != "cuda":
+        print("Aviso: --amp só funciona na GPU; treinando em float32.")
+        args.amp = False
+    scaler = make_scaler() if args.amp else None
 
     # Dados: treino com as copas do TEBAKA como alvo e aumento de dados.
     spec = InputSpec.load(args.entrada)
@@ -280,7 +286,7 @@ def main(argv=None):
             losses = train_step(model, opt, images, targets, device,
                                 consistency=consistency,
                                 consistency_weight=args.peso_consistencia,
-                                stage2=stage2)
+                                stage2=stage2, scaler=scaler)
             for k, v in losses.items():
                 if isinstance(v, float):
                     sums[k] = sums.get(k, 0.0) + v
