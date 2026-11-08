@@ -51,7 +51,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import math
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass
 
 import torch
@@ -234,8 +234,11 @@ def train_step(model, optimizer, images, targets, device,
     model.train()
     images, targets = to_device(images, targets, device)
     amp = scaler is not None and scaler.is_enabled()
-    with torch.autocast(device_type=torch.device(device).type, dtype=torch.float16,
-                        enabled=amp):
+    # Sem AMP, nenhum autocast: no torch 2.0, até um autocast desligado na CPU
+    # falha com float16.
+    ctx = (torch.autocast(device_type=torch.device(device).type, dtype=torch.float16)
+           if amp else nullcontext())
+    with ctx:
         total, out = _step_losses(model, images, targets, consistency,
                                   consistency_weight, stage2)
 
