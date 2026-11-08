@@ -97,6 +97,9 @@ class CrownMetrics:
         self.pred_areas: list[int] = []        # todas as copas previstas
         self.ref_areas: list[int] = []         # todas as copas da referência
         self.matched_areas: list[tuple[int, int]] = []   # (prevista, referência)
+        # Acertos por copa da referência: {(imagem, id na referência): área prevista}.
+        # Serve para comparar métodos só nas copas que todos acertaram.
+        self.matched_by_ref: dict[tuple, tuple[int, int]] = {}
 
     def add(self, pred: np.ndarray, ref: np.ndarray, index: int | None = None,
             pred_mask: np.ndarray | None = None) -> dict:
@@ -115,6 +118,9 @@ class CrownMetrics:
         self.ref_areas += [int(a) for a in r_area[1:] if a > 0]
         pairs = [(int(p_area[p]), int(r_area[r])) for p, r, _ in m["pairs"]]
         self.matched_areas += pairs
+        key = index if index is not None else len(self.rows)
+        for (p, r, _), (pa, ra) in zip(m["pairs"], pairs):
+            self.matched_by_ref[(key, int(r))] = (pa, ra)
         row["erro_area_medio"] = (float(np.mean([abs(a - b) for a, b in pairs]))
                                   if pairs else "")
         self.rows.append(row)
@@ -142,12 +148,45 @@ class CrownMetrics:
         if self.matched_areas:
             d = np.array([a - b for a, b in self.matched_areas], dtype=float)
             rmse, mae = float(np.sqrt(np.mean(d ** 2))), float(np.mean(np.abs(d)))
+            rel = relative_area_error(self.matched_areas)
         else:
-            rmse = mae = 0.0
-        return {"area_rmse": rmse, "area_mae": mae,
+            rmse = mae = rel = 0.0
+        return {"area_rmse": rmse, "area_mae": mae, "area_erro_rel": rel,
                 "area_kl": area_kl(self.ref_areas, self.pred_areas),
                 "area_mediana_pred": float(np.median(self.pred_areas)) if self.pred_areas else 0.0,
                 "area_mediana_ref": float(np.median(self.ref_areas)) if self.ref_areas else 0.0}
+
+
+def relative_area_error(pairs) -> float:
+    """Erro relativo médio de área, |prevista - referência| / referência.
+
+    Diferente do MAE em pixels, não cresce com o tamanho da copa: errar 20 px
+    numa copa de 100 px (20%) pesa mais que errar 40 px numa de 1000 (4%).
+    pairs: lista de (área prevista, área da referência).
+    """
+    if not pairs:
+        return 0.0
+    return float(np.mean([abs(p - r) / r for p, r in pairs if r > 0]))
+
+
+def common_area_error(metrics: dict[str, "CrownMetrics"]) -> dict:
+    """Erro relativo de área de cada método só nas copas que **todos** acertaram.
+
+    O MAE de área de cada método conta só as copas que ele acertou, e cada
+    método acerta copas diferentes (um que acerta copas grandes e difíceis
+    tem MAE maior em pixels sem errar mais). Aqui o conjunto é o mesmo para
+    todos: as copas da referência casadas por todos os métodos. Os métodos
+    precisam ter sido avaliados nas mesmas imagens, com os mesmos índices.
+
+    Devolve {"n_copas": n, "<método>": erro relativo médio, ...}.
+    """
+    if not metrics:
+        return {"n_copas": 0}
+    common = set.intersection(*(set(m.matched_by_ref) for m in metrics.values()))
+    out: dict = {"n_copas": len(common)}
+    for name, m in metrics.items():
+        out[name] = relative_area_error([m.matched_by_ref[k] for k in sorted(common)])
+    return out
 
 
 def area_kl(ref_areas, pred_areas, bins: int = 20, eps: float = 0.5) -> float:
@@ -179,7 +218,8 @@ def format_summary(s: dict) -> str:
     return (f"P={s['precisao']:.2f} R={s['revocacao']:.2f} F1={s['f1']:.2f} "
             f"IoU_copa={s['iou_copa']:.2f} IoU_pixel={s['iou_pixel']:.2f} "
             f"erro_contagem={s['erro_contagem']:.1f} "
-            f"MAE_area={s.get('area_mae', 0):.0f}px KL_area={s.get('area_kl', 0):.2f}")
+            f"MAE_area={s.get('area_mae', 0):.0f}px "
+            f"erro_rel_area={s.get('area_erro_rel', 0):.2f} KL_area={s.get('area_kl', 0):.2f}")
 
 
 # --------------------------------------------------------------------------

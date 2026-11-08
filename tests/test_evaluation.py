@@ -120,6 +120,7 @@ def test_metricas_de_area():
     assert s["area_rmse"] == pytest.approx(np.sqrt((20 ** 2 + 0) / 2))
     assert s["area_mediana_ref"] == 100 and s["area_mediana_pred"] == 100
     assert m.rows[0]["erro_area_medio"] == pytest.approx(10)
+    assert s["area_erro_rel"] == pytest.approx((20 / 100 + 0) / 2)
     # KL: zero para distribuições iguais, positiva para diferentes, e maior
     # quanto mais diferentes.
     assert area_kl([100, 200, 400], [100, 200, 400]) == pytest.approx(0, abs=1e-6)
@@ -127,3 +128,27 @@ def test_metricas_de_area():
     b = area_kl([100] * 10 + [200] * 10, [800] * 20)
     assert 0 < a < b
     assert area_kl([], [100]) == 0.0
+
+
+def test_erro_de_area_nas_copas_que_todos_acertaram():
+    from rsskd.evaluation import common_area_error
+
+    ref = np.zeros((64, 64), np.int32)
+    ref[0:10, 0:10] = 1                       # copa pequena, 100 px
+    ref[20:40, 20:40] = 2                     # copa grande, 400 px
+    # A acerta só a pequena, com 10% de erro.
+    a = np.zeros((64, 64), np.int32)
+    a[0:10, 0:11] = 1
+    # B acerta as duas: a pequena com 10% de erro e a grande com 20%.
+    b = np.zeros((64, 64), np.int32)
+    b[0:10, 0:11] = 1
+    b[20:40, 20:44] = 2
+    ma, mb = CrownMetrics(), CrownMetrics()
+    ma.add(a, ref, index=0)
+    mb.add(b, ref, index=0)
+    # Cada um no seu conjunto: B parece pior em pixels (acertou a copa grande).
+    assert mb.summary()["area_mae"] > ma.summary()["area_mae"]
+    # Nas copas em comum (só a pequena), os dois erram igual.
+    c = common_area_error({"A": ma, "B": mb})
+    assert c["n_copas"] == 1
+    assert c["A"] == pytest.approx(0.1) and c["B"] == pytest.approx(0.1)
