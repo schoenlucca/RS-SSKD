@@ -65,6 +65,13 @@ def test_avaliar_pastas(conjunto, tmp_path):
     assert linhas[1]["previsoes"] == "vazia" and linhas[1]["revocacao"] == 0.0
     md = (tmp_path / "saidas" / "previsoes_test.md").read_text(encoding="utf-8")
     assert "| referência copiada | 1.00 | 1.00 | 1.00 |" in md
+    # Intervalo do F1, comparação pareada com a linha de base (a primeira
+    # pasta) e as contagens por imagem para refazer o bootstrap depois.
+    assert linhas[0]["f1_inf"] == linhas[0]["f1_sup"] == 1.0
+    assert "| vazia | -1,000 [-1,000; -1,000] |" in md
+    assert "copas da referência que todos os métodos acertaram" in md
+    por_imagem = (tmp_path / "saidas" / "previsoes_test_por_imagem.csv").read_text(encoding="utf-8")
+    assert por_imagem.count("\n") == 1 + 2 * len(ds)
 
     # Uma pasta incompleta interrompe a avaliação, em vez de dar números errados.
     incompleta = PredictionStore(tmp_path / "incompleta")
