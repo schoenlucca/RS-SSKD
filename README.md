@@ -98,7 +98,13 @@ python scripts/run_seeds.py --nome e2_kd_regra --sementes 0 1 2 -- --professor r
 ```
 
 `--mu-max` liga a regra 1 de Harmon; `--peso-kd` e `--temperatura` controlam a
-auto-destilação.
+auto-destilação. A área de referência da regra é, por padrão, a mediana das
+caixas das copas do TEBAKA no treino; `--estat-area p90` usa o percentil 90, para
+a regra pesar só sobre as copas grandes demais (em geral, árvores vizinhas
+fundidas pelo professor).
+
+Na GPU, `--amp` treina em precisão mista (float16), mais rápido e com menos
+memória.
 
 ### 4. Avaliar e comparar
 
@@ -109,7 +115,18 @@ python scripts/evaluate_student.py --run runs/curto_l0_s0 --modelo epocas/epoca_
 ```
 
 **O teste é para o fim.** Escolha parâmetros e modelos pela validação, sem
-olhar a referência; rode `--split test` uma vez, só nas versões finais.
+olhar a referência; rode o teste uma vez, só nas versões finais, com:
+
+```
+python scripts/final_test.py "Etapa 1=runs/curto_l0_s*" "Etapa 2=runs/e2_kd_s*"
+```
+
+Ele exporta as previsões de cada semente, mede tudo contra a referência e
+grava em `saidas/teste_final.md` a média ± desvio entre sementes, a diferença
+de F1 de cada método para o TEBAKA (bootstrap pareado nas imagens, com
+intervalo de 95% e valor p) e o erro relativo de área nas copas que todos
+acertaram. Cada execução no teste fica anotada em `saidas/registro_teste.csv`.
+Com `--split val`, faz o mesmo na validação, sem anotar.
 
 ### 5. Comparar com outros métodos (o SAM do Felipe)
 
@@ -121,7 +138,9 @@ python scripts/figure_predictions.py TEBAKA=data/pseudo/agml "Aluno=previsoes/e2
 
 Qualquer pasta no formato de `rsskd/predictions.py` (uma imagem de etiquetas
 por recorte: 0 = fundo, 1..N = copas, em `.npz` ou PNG de 16 bits) é medida
-com as mesmas métricas. A conferência pela soma das bandas avisa se as
+com as mesmas métricas. A primeira pasta é a linha de base: a tabela traz o
+intervalo de 95% do F1 de cada método e a diferença de cada um para ela, por
+bootstrap pareado (`rsskd/stats.py`). A conferência pela soma das bandas avisa se as
 imagens estiverem fora de ordem.
 
 ### 6. Ortomosaico do drone
@@ -160,11 +179,15 @@ diagnóstico**: escolher por ele usaria rótulos humanos.
 | TEBAKA (linha de base) | 0,52 | 0,47 | 0,49 | 3,5 | 0,50 |
 | Aluno etapa 1, 4 épocas (3 sementes) | 0,47 | 0,56 | 0,51 | 4,7 | 0,12 |
 | Aluno etapa 1, 20 épocas | 0,48 | 0,50 | 0,49 | 3,1 | 0,11 |
+| Aluno etapa 2, auto-destilação, 4 épocas (3 sementes) | 0,48 | 0,57 | 0,52 | 4,3 | 0,10 |
+| Aluno etapa 2, auto-destilação, 20 épocas (1 semente) | 0,52 | 0,54 | 0,53 | 3,3 | 0,11 |
 
 Com 4 épocas, o aluno supera o professor nas 3 sementes (F1 0,507 ± 0,003): acha
 mais copas e reproduz muito melhor a distribuição de tamanhos. A consistência do
 RS-SSKD não mudou o F1 e dobra o tempo por época (~170 s contra ~82 s numa
-RTX 3050). No teste, o TEBAKA tem F1 0,52.
+RTX 3050). Na etapa 2, a auto-destilação (com o aluno de 4 épocas como
+professor) sobe o F1 para 0,521 ± 0,003, e com ela o treino longo deixa de
+cair; a regra 1 com a mediana não mudou o F1. No teste, o TEBAKA tem F1 0,52.
 
 ## Estrutura
 
@@ -176,7 +199,8 @@ RTX 3050). No teste, o TEBAKA tem F1 0,52.
 | `rsskd/detector.py` | O aluno (Mask R-CNN, ResNet-101 + FPN) |
 | `rsskd/train.py` | Passo de treino das etapas 1 e 2 |
 | `rsskd/consistency.py`, `rsskd/distill.py`, `rsskd/rules.py` | Consistência, auto-destilação e regra 1 |
-| `rsskd/evaluation.py` | Métricas por copa e de área |
+| `rsskd/evaluation.py` | Métricas por copa e de área (incluindo o erro relativo nas copas em comum) |
+| `rsskd/stats.py` | Intervalos de confiança e comparação pareada por bootstrap |
 | `rsskd/predictions.py`, `rsskd/tiling.py` | Previsões em arquivo e ortomosaicos |
 | `rsskd/paths.py` | Mensagens claras quando falta um arquivo |
 | `rsskd/model.py`, `rsskd/losses.py` | RS-SSKD original de classificação, mantido como referência |
