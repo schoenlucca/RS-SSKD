@@ -1,5 +1,5 @@
 {
-  "_comentario": "Professor TEBAKA nas fotos do Cerrado (DJI Mavic 3M), preparadas por scripts/prepare_cerrado.py. Ponto de partida, ainda sem calibração: os limiares de NDVI são escolhidos por Otsu em cada recorte (sem rótulo nenhum), e as distâncias e áreas mínimas vêm do AgML. Ajustar olhando os recortes antes de gerar as copas.",
+  "_comentario": "Professor TEBAKA nas fotos do Cerrado (DJI Mavic 3M), preparadas por scripts/prepare_cerrado.py. Ajustado a olho em 6 recortes de treino (scripts/tune_teacher.py), sem referência: na mata fechada, o limiar de Otsu cortava a vegetação ao meio, então o limiar de NDVI é fixo (0,15, deixa de fora estrada, solo e as sombras entre copas), e as copas são separadas pelo brilho do NIR suavizado (split_by=nir, sigma 6), não pela distância ao fundo.",
   "conjunto": "projeto_cerrado (LISA/UnB), fotos processed-*_MS_*.TIF",
   "bandas": {
     "_comentario": "Índices das bandas nos recortes de data/cerrado (rsskd/cerrado.py, BAND_ORDER). Não há banda azul: a foto RGB vem de outra câmera e fica desalinhada.",
@@ -11,12 +11,15 @@
   "professor": {
     "nir_band": 3,
     "red_band": 0,
-    "th1": "otsu",
-    "th2": "otsu",
+    "th1": 0.15,
+    "th2": 0.15,
     "nlm_h": 10.0,
     "nlm_template": 7,
     "nlm_search": 21,
-    "min_distance": 18,
-    "min_area": 300
+    "min_distance": 20,
+    "min_area": 300,
+    "split_by": "nir",
+    "sigma": 6,
+    "_ajuste": "Escolhido a olho por scripts/tune_teacher.py em recortes de treino, sem referência: split_by=nir, th1=0.15, th2=0.15, min_distance=20, sigma=6"
   }
 }

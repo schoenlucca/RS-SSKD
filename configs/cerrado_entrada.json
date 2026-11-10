@@ -1,0 +1,27 @@
+{
+  "_comentario": "Normalização da entrada do aluno: média e desvio de cada canal nas 2640 imagens de treino de data/cerrado. Gerado por scripts/compute_input_stats.py.",
+  "nir_band": 3,
+  "red_band": 0,
+  "add_ndvi": true,
+  "channels": [
+    "vermelho",
+    "verde",
+    "red_edge",
+    "nir",
+    "ndvi"
+  ],
+  "mean": [
+    57.327496,
+    59.944148,
+    79.76507,
+    99.135724,
+    0.258083
+  ],
+  "std": [
+    30.013897,
+    29.730413,
+    36.244646,
+    38.450337,
+    0.2408
+  ]
+}
