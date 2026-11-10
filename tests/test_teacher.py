@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -107,3 +108,31 @@ def test_configuracao_do_professor(tmp_path):
     ruim.write_text(json.dumps({"professor": {"nir_bnad": 3}}), encoding="utf-8")
     with pytest.raises(KeyError):
         TebakaTeacher.from_config(ruim)
+
+
+def test_mata_fechada_separa_pelo_brilho_do_nir():
+    # Copas que se tocam em toda a imagem: tudo é vegetação (NDVI alto em
+    # todo pixel), e só o brilho distingue uma copa da outra (topo claro,
+    # sombra escura entre elas). 9 copas numa grade 3x3.
+    S = 180
+    yy, xx = np.mgrid[:S, :S]
+    nir = np.full((S, S), 0.30)
+    for cy in (30, 90, 150):
+        for cx in (30, 90, 150):
+            nir += 0.30 * np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / (2 * 16.0 ** 2))
+    img = np.zeros((S, S, 5))
+    img[..., RED], img[..., NIR] = 0.03, nir
+
+    def prof(**extra) -> TebakaTeacher:
+        return TebakaTeacher(nir_band=NIR, red_band=RED, min_distance=20, min_area=200, **extra)
+
+    dist = prof()(img)
+    brilho = prof(split_by="nir", sigma=3.0)(img)
+    assert dist["vegetation"].mean() > 0.95                 # máscara cobre quase tudo
+    assert brilho["n_crowns"] == 9
+    assert dist["n_crowns"] < 9                             # a distância não separa
+    # Cada centro de copa numa etiqueta própria.
+    centros = {int(brilho["instances"][y, x]) for y in (30, 90, 150) for x in (30, 90, 150)}
+    assert len(centros) == 9 and 0 not in centros
+    with pytest.raises(ValueError):
+        prof(split_by="altura")(img)

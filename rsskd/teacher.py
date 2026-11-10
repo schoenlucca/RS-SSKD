@@ -11,8 +11,8 @@ O que o TEBAKA faz (Fig. 3 do artigo) e o que acrescentamos:
   3. Remoção de ruído FastNLMeans e novo limiar th2.                     [TEBAKA]
   4. Erosão 5x5, dilatação 3x3, erosão 3x3, dilatação 3x3 (acabamento).  [TEBAKA]
   5. Separação em copas individuais (watershed sobre a distância ao     [nosso]
-     fundo), porque queremos uma máscara por árvore, não só
-     "vegetação contra fundo".
+     fundo, ou sobre o brilho do NIR na mata fechada), porque queremos
+     uma máscara por árvore, não só "vegetação contra fundo".
   6. Filtro por área (descarta manchas pequenas demais).                 [nosso]
 
 O resultado do passo 5/6 substitui as anotações humanas no treino do aluno.
@@ -127,6 +127,8 @@ def split_crowns(
     mask: np.ndarray,
     min_distance: int = 15,
     min_area: int = 200,
+    intensity: np.ndarray | None = None,
+    sigma: float = 2.0,
 ) -> np.ndarray:
     """Separa a máscara de vegetação em copas, uma etiqueta por árvore.
 
@@ -135,12 +137,26 @@ def split_crowns(
     onde duas copas se encostam fica perto (vale). O watershed "inunda" a
     partir dos picos e traça a fronteira nos vales, separando as copas.
 
+    Mata fechada (intensity). Quando as copas se tocam em quase toda a
+    imagem, como no cerradão, a máscara de vegetação cobre quase tudo e a
+    distância ao fundo deixa de ter um pico por copa: ela só cresce longe
+    das estradas. Aí a superfície do watershed passa a ser o brilho da
+    imagem (o NIR), suavizado por um filtro gaussiano de desvio `sigma`: o
+    topo de cada copa, iluminado pelo sol, é mais claro; o espaço entre duas
+    copas fica na sombra, mais escuro. Os picos do brilho viram os centros, e
+    as fronteiras caem nas sombras. É a ideia clássica de delineação de copas
+    por "vales de sombra" (Gougeon, 1995). O sigma faz o papel de escala: um
+    sigma pequeno acha um pico por galho; um grande junta copas vizinhas.
+
     Parâmetros:
         min_distance: distância mínima (em pixels) entre dois centros de
                       copa. Valores pequenos dividem copas grandes em várias;
                       valores grandes juntam copas vizinhas. Deve ser
                       próximo do raio de uma copa pequena, em pixels.
         min_area:     manchas com menos pixels são descartadas (ruído, capim).
+        intensity:    None = distância ao fundo (padrão, como no AgML);
+                      uma imagem (H, W) = brilho para a mata fechada.
+        sigma:        suavização do brilho, em pixels (só com intensity).
 
     Retorna uma imagem de etiquetas: 0 = fundo, 1..N = copa 1..N.
     """
@@ -151,19 +167,22 @@ def split_crowns(
     if not mask.any():
         return np.zeros(mask.shape, np.int32)
 
-    dist = np.asarray(ndi.distance_transform_edt(mask))
+    if intensity is None:
+        surface = np.asarray(ndi.distance_transform_edt(mask))
+    else:
+        surface = np.asarray(ndi.gaussian_filter(intensity.astype(np.float64), sigma))
 
-    # Picos da distância = prováveis centros de copa.
+    # Picos da superfície = prováveis centros de copa.
     # labels= garante pelo menos um pico por mancha desconectada.
     comps = ndi.label(mask)[0]  # type: ignore[index]
-    peaks = peak_local_max(dist, min_distance=min_distance, labels=comps,
+    peaks = peak_local_max(surface, min_distance=min_distance, labels=comps,
                            exclude_border=False)
     markers = np.zeros(mask.shape, np.int32)
     peaks = np.asarray(peaks, np.intp)            # (n_picos, 2): linha, coluna
     markers[peaks[:, 0], peaks[:, 1]] = np.arange(1, len(peaks) + 1)
 
-    # Watershed sobre -distância: os centros são os "fundos" dos vales.
-    labels = watershed(-dist, markers, mask=mask)
+    # Watershed sobre -superfície: os centros são os "fundos" dos vales.
+    labels = watershed(-surface, markers, mask=mask)
 
     # Passo 6: remove copas pequenas que sobraram após a divisão.
     labels = _remove_small_labels(labels, min_area)
@@ -207,6 +226,8 @@ class TebakaTeacher:
     nlm_search: int = 21
     min_distance: int = 15
     min_area: int = 200
+    split_by: str = "distance"          # "distance" (AgML) ou "nir" (mata fechada)
+    sigma: float = 2.0                  # suavização do NIR, com split_by="nir"
     channels_first: bool | None = None  # None = detectar automaticamente
     extra: dict = field(default_factory=dict)
 
@@ -241,7 +262,10 @@ class TebakaTeacher:
         ndvi = compute_ndvi(nir, red)
         veg = vegetation_mask(ndvi, self.th1, self.th2, self.nlm_h,
                               self.nlm_template, self.nlm_search)
-        inst = split_crowns(veg, self.min_distance, self.min_area)
+        if self.split_by not in ("distance", "nir"):
+            raise ValueError(f"split_by deve ser 'distance' ou 'nir', não {self.split_by!r}.")
+        inst = split_crowns(veg, self.min_distance, self.min_area,
+                            nir if self.split_by == "nir" else None, self.sigma)
         return {
             "ndvi": ndvi,
             "vegetation": veg,
