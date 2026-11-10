@@ -117,14 +117,30 @@ def mask_to_binary(mask: np.ndarray) -> np.ndarray:
     return (mask > 0).astype(np.uint8)
 
 
-def mask_to_instances(mask: np.ndarray) -> np.ndarray:
-    """Numera as copas da referência pelas manchas desconectadas.
+def is_instance_mask(mask: np.ndarray) -> bool:
+    """True se a máscara já traz um número por copa (mais de um valor acima
+    de zero, numa imagem de um canal), e não só copa contra fundo."""
+    return mask.ndim == 2 and len(np.unique(mask[mask > 0])) > 1
 
-    As máscaras do conjunto são de copa contra fundo (sem número por árvore).
-    Como as copas da plantação são quase todas separadas, cada mancha
-    desconectada é tratada como uma árvore. Copas encostadas na referência
-    viram uma só; isso deve ser lembrado na avaliação.
+
+def mask_to_instances(mask: np.ndarray) -> np.ndarray:
+    """Numera as copas da referência: 0 = fundo, 1..N = copas.
+
+    Dois casos:
+      - máscara de copa contra fundo (AgML): as copas da plantação são quase
+        todas separadas, então cada mancha desconectada é tratada como uma
+        árvore. Copas encostadas viram uma só; isso deve ser lembrado na
+        avaliação;
+      - máscara com um número por copa (os rótulos feitos à mão no Cerrado,
+        onde quase todas as copas se encostam): os números são mantidos,
+        só renumerados para 1..N em ordem.
     """
+    if is_instance_mask(mask):
+        ids, labels = np.unique(mask, return_inverse=True)
+        labels = labels.reshape(mask.shape)
+        if ids[0] != 0:                    # sem fundo: todos os ids são copas
+            labels = labels + 1
+        return labels.astype(np.int32)
     labels = ndi.label(mask_to_binary(mask))[0]  # type: ignore[index]
     return np.asarray(labels, np.int32)
 
@@ -135,7 +151,7 @@ def mask_to_instances(mask: np.ndarray) -> np.ndarray:
 @dataclass
 class Sample:
     bands: np.ndarray       # (C, H, W), como vem no arquivo
-    mask: np.ndarray        # (H, W), 0/1
+    mask: np.ndarray        # (H, W): 0/1, ou 0..N quando há um número por copa
     rgb: np.ndarray | None  # (H, W, 3) ou None
     split: str
     index: int
@@ -173,7 +189,11 @@ class AgmlTreeCrowns:
         shape = None if shape is None else [int(s) for s in shape]
         bands = decode_array(row["bands"], shape, row.get("bands_dtype"))
 
-        mask = mask_to_binary(decode_array(row["mask"]))
+        mask = decode_array(row["mask"])
+        # Máscara com um número por copa (rótulos à mão) fica como está, em
+        # int32; copa contra fundo (AgML) vira 0/1.
+        mask = (mask.astype(np.int32) if is_instance_mask(mask)
+                else mask_to_binary(mask))
         rgb = decode_array(row["rgb"]) if "rgb" in row and row["rgb"] is not None else None
 
         meta = row.get("band_metadata")

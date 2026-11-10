@@ -86,3 +86,32 @@ def test_instancias_e_metricas(pasta):
     r = match_instances(so_uma, ref)
     assert r["tp"] == 1 and r["fn"] == 1 and r["fp"] == 0
     assert iou_binary(ref > 0, ref > 0) == 1.0
+
+
+def test_mascara_com_um_numero_por_copa(tmp_path):
+    # Rótulos à mão no Cerrado: copas encostadas, cada uma com seu número.
+    # Como copa contra fundo, as duas virariam uma só; com os números, ficam 2.
+    import io
+
+    import pandas as pd
+    from PIL import Image
+
+    from rsskd.data import is_instance_mask
+
+    m = np.zeros((H, W), np.uint16)
+    m[4:20, 4:16] = 7
+    m[4:20, 16:28] = 300                                     # encostada na copa 7
+    assert is_instance_mask(m) and not is_instance_mask((m > 0).astype(np.uint8) * 255)
+    assert mask_to_instances((m > 0).astype(np.uint8)).max() == 1
+    ref = mask_to_instances(m)
+    assert ref.max() == 2 and ref[10, 10] != ref[10, 20] and ref[0, 0] == 0
+
+    buf = io.BytesIO()
+    Image.fromarray(m).save(buf, format="PNG")              # PNG de 16 bits
+    bandas = np.zeros((4, H, W), np.uint8)
+    pd.DataFrame([{"bands": bandas.tobytes(), "bands_shape": list(bandas.shape),
+                   "bands_dtype": "uint8", "mask": buf.getvalue(), "split": "test"}]
+                 ).to_parquet(tmp_path / "test.parquet")
+    s = AgmlTreeCrowns(tmp_path, split="test")[0]
+    assert s.mask.max() == 300                               # os números chegam inteiros
+    assert mask_to_instances(s.mask).max() == 2
