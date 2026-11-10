@@ -8,7 +8,8 @@ venv/
 # Dados, pesos e resultados ficam fora do git
 data/
 checkpoints/
-runs/
+# Sem a barra: no servidor, runs é um atalho (symlink) para ~/resultados.
+runs
 outputs/
 *.pt
 *.pth
