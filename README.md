@@ -157,6 +157,38 @@ As bandas devem seguir a ordem do AgML. A saída é um GeoTIFF de etiquetas
 alinhado à imagem e um CSV com uma linha por copa (área em m² e coordenadas
 do centro).
 
+### 7. Fotos do Cerrado (DJI Mavic 3M)
+
+As fotos do laboratório (`projeto_cerrado/<voo>/processed-*_MS_{G,R,RE,NIR}.TIF`)
+viram o mesmo formato do AgML, e o resto do pipeline roda com outra `--pasta`
+e outra configuração. No servidor do LISA:
+
+```
+python3 scripts/prepare_cerrado.py                       # data/cerrado: voos de chuva, divisão por voo
+python3 scripts/tune_teacher.py --grade split_by=nir th=0.05,0.15 min_distance=20,30 sigma=4,6
+python3 scripts/tune_teacher.py --grade ... --gravar N   # grava a linha escolhida
+python3 scripts/generate_pseudolabels.py --pasta data/cerrado --config configs/cerrado_teacher.json --saida data/pseudo/cerrado --divisoes train val
+python3 scripts/compute_input_stats.py --pasta data/cerrado --config configs/cerrado_teacher.json --saida configs/cerrado_entrada.json
+python3 scripts/run_seeds.py --nome cerrado_l0 --sementes 0 1 -- --pasta data/cerrado --copas data/pseudo/cerrado --entrada configs/cerrado_entrada.json --epocas 4 --peso-consistencia 0 --amp
+python3 scripts/check_without_labels.py "runs/cerrado_l0_s*"
+```
+
+- **Entrada:** só as 4 bandas do Mavic 3M (verde, vermelho, Red-Edge, NIR) mais
+  o NDVI, 5 canais. A foto RGB vem de outra câmera e fica desalinhada de 0,3
+  a 2,6 pixels, por isso o azul não entra.
+- **Escala e recortes:** cada foto de 1000×1000 é reduzida pela metade e
+  cortada em 4 recortes de 256, para as copas grandes caberem inteiras.
+- **Professor na mata fechada:** quase não há solo entre as copas, então o
+  limiar de NDVI é fixo e baixo (0,15), e as copas são separadas pelo brilho
+  do NIR (`split_by=nir`), não pela distância ao fundo. Os parâmetros foram
+  escolhidos a olho, em recortes de treino (`tune_teacher.py`), porque não há
+  referência.
+- **Sem referência:** até existirem os rótulos à mão, o
+  `check_without_labels.py` mede o que dá: a concordância com o professor, a
+  estabilidade da previsão sob rotação e espelhamento e a concordância entre
+  as sementes. As máscaras de referência podem trazer um número por copa
+  (PNG de 16 bits), e as copas encostadas continuam separadas na avaliação.
+
 ## O que sai em cada pasta
 
 Nenhuma dessas pastas vai para o git.
@@ -165,6 +197,7 @@ Nenhuma dessas pastas vai para o git.
 | --- | --- |
 | `data/agml_tree_crown/` | Conjunto AgML baixado |
 | `data/pseudo/agml/` | Copas do TEBAKA por divisão e `resumo.json` |
+| `data/cerrado/`, `data/pseudo/cerrado/` | Recortes do Cerrado (`manifesto.json`) e as copas do professor neles |
 | `runs/<treino>/` | `config.json`, `historico.csv` (perdas e métricas por época), `melhor.pt` (pelo critério do treino), `ultimo.pt`, `epocas/epoca_NN.pt` (com `--salvar-epocas`), `avaliacao_*` |
 | `previsoes/<método>/` | Copas exportadas e `info.json` |
 | `saidas/` | Tabelas (`comparacao.md`, `previsoes_*.csv`), figuras e checagens |
@@ -194,7 +227,7 @@ cair; a regra 1 com a mediana não mudou o F1. No teste, o TEBAKA tem F1 0,52.
 | Caminho | Conteúdo |
 | --- | --- |
 | `rsskd/teacher.py`, `rsskd/pseudolabels.py` | Professor TEBAKA e suas copas |
-| `rsskd/data.py` | Leitura do AgML, casamento de copas |
+| `rsskd/data.py` | Leitura do AgML (e da referência com um número por copa), casamento de copas |
 | `rsskd/inputs.py`, `rsskd/dataset.py`, `rsskd/augment.py` | Entrada de 6 canais, conjunto e transformações D4 |
 | `rsskd/detector.py` | O aluno (Mask R-CNN, ResNet-101 + FPN) |
 | `rsskd/train.py` | Passo de treino das etapas 1 e 2 |
@@ -202,10 +235,11 @@ cair; a regra 1 com a mediana não mudou o F1. No teste, o TEBAKA tem F1 0,52.
 | `rsskd/evaluation.py` | Métricas por copa e de área (incluindo o erro relativo nas copas em comum) |
 | `rsskd/stats.py` | Intervalos de confiança e comparação pareada por bootstrap |
 | `rsskd/predictions.py`, `rsskd/tiling.py` | Previsões em arquivo e ortomosaicos |
+| `rsskd/cerrado.py` | Leitura das fotos do Mavic 3M no formato do AgML |
 | `rsskd/paths.py` | Mensagens claras quando falta um arquivo |
 | `rsskd/model.py`, `rsskd/losses.py` | RS-SSKD original de classificação, mantido como referência |
 | `scripts/` | Um script por passo acima |
-| `configs/` | Parâmetros do professor e normalização da entrada |
+| `configs/` | Parâmetros do professor e normalização da entrada (AgML e Cerrado) |
 | `tests/` | Testes (`pytest`) |
 
 ## Testes
