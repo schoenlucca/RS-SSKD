@@ -1,5 +1,7 @@
 """Leitura das fotos do Cerrado (rsskd/cerrado.py, scripts/prepare_cerrado.py)."""
 
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path
