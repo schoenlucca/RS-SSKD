@@ -48,7 +48,7 @@ def main(argv=None):
                               bands_cfg["nir"], bands_cfg["vermelho"], names)
     spec.save(args.saida, comment=(
         f"Normalização da entrada do aluno: média e desvio de cada canal nas "
-        f"{len(ds)} imagens de treino do AgML. Gerado por "
+        f"{len(ds)} imagens de treino de {args.pasta}. Gerado por "
         f"scripts/compute_input_stats.py."))
 
     print(f"{len(ds)} imagens de treino, {spec.in_channels} canais")

@@ -1,0 +1,22 @@
+{
+  "_comentario": "Professor TEBAKA nas fotos do Cerrado (DJI Mavic 3M), preparadas por scripts/prepare_cerrado.py. Ponto de partida, ainda sem calibração: os limiares de NDVI são escolhidos por Otsu em cada recorte (sem rótulo nenhum), e as distâncias e áreas mínimas vêm do AgML. Ajustar olhando os recortes antes de gerar as copas.",
+  "conjunto": "projeto_cerrado (LISA/UnB), fotos processed-*_MS_*.TIF",
+  "bandas": {
+    "_comentario": "Índices das bandas nos recortes de data/cerrado (rsskd/cerrado.py, BAND_ORDER). Não há banda azul: a foto RGB vem de outra câmera e fica desalinhada.",
+    "vermelho": 0,
+    "verde": 1,
+    "red_edge": 2,
+    "nir": 3
+  },
+  "professor": {
+    "nir_band": 3,
+    "red_band": 0,
+    "th1": "otsu",
+    "th2": "otsu",
+    "nlm_h": 10.0,
+    "nlm_template": 7,
+    "nlm_search": 21,
+    "min_distance": 18,
+    "min_area": 300
+  }
+}
