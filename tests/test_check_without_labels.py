@@ -51,6 +51,12 @@ def test_script_com_duas_sementes(dados_falsos, tmp_path):
     with pytest.raises(FileNotFoundError):
         main([str(tmp_path / "runs" / "nada*")])
 
+    # Com TTA: sem estabilidade (é 1 por construção), saídas com sufixo _tta.
+    linhas, pares = main([str(tmp_path / "runs" / "c_s*"), "--dispositivo", "cpu",
+                          "--saida", str(tmp_path / "saidas"), "--n", "2", "--tta"])
+    assert "estabilidade" not in linhas[1] and list(pares) == ["c_s0 x c_s1"]
+    assert (tmp_path / "saidas" / "sem_referencia_val_tta.md").exists()
+
 
 def test_professor_e_quase_estavel_na_rotacao():
     from check_without_labels import TRANSFORMS, f1_between, teacher_rotated

@@ -27,6 +27,12 @@ acaso da inicialização.
 Para comparar, a estabilidade é medida também no professor (o TEBAKA
 aplicado na imagem girada e desfeito de volta).
 
+Com --tta, o aluno prevê cada imagem nas 8 orientações combinadas
+(rsskd/tta.py). A estabilidade deixa de ser medida: o TTA usa as mesmas 8
+orientações em qualquer imagem girada, então dá o mesmo resultado por
+construção. O que interessa com TTA é se a concordância entre as sementes e
+com o professor sobe. As saídas ganham o sufixo _tta.
+
 Saídas em saidas/: sem_referencia_<divisão>.md e .json.
 """
 
@@ -46,7 +52,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rsskd.augment import dihedral, dihedral_torch, inverse_dihedral  # noqa: E402
 from rsskd.dataset import CrownDataset  # noqa: E402
-from rsskd.evaluation import CrownMetrics, predictions_to_instances  # noqa: E402
+from rsskd.evaluation import CrownMetrics, predict_crowns, predictions_to_instances  # noqa: E402
 from rsskd.inputs import InputSpec  # noqa: E402
 from rsskd.paths import MissingFileError  # noqa: E402
 from rsskd.teacher import TebakaTeacher  # noqa: E402
@@ -71,9 +77,14 @@ def stats(labels: list[np.ndarray]) -> dict:
 
 
 @torch.no_grad()
-def student_predictions(model, images, device, transform=None, score_thr=0.5):
+def student_predictions(model, images, device, transform=None, score_thr=0.5,
+                        tta=False, tta_votes=None):
     """Copas do aluno em cada imagem; com transform=(k, espelha), prevê na
-    imagem transformada e desfaz a transformação nas copas."""
+    imagem transformada e desfaz a transformação nas copas. Com tta, cada
+    imagem é prevista nas 8 orientações combinadas."""
+    if tta:
+        return [predict_crowns(model, x, device, score_thr, tta=True, tta_votes=tta_votes)
+                for x in images]
     out = []
     for x in images:
         if transform:
@@ -107,6 +118,9 @@ def main(argv=None):
     ap.add_argument("--limiar-score", type=float, default=0.5)
     ap.add_argument("--dispositivo", default="auto")
     ap.add_argument("--saida", default="saidas")
+    ap.add_argument("--tta", action="store_true",
+                    help="o aluno prevê com as 8 orientações combinadas (rsskd/tta.py)")
+    ap.add_argument("--tta-votos", type=int, default=None)
     args = ap.parse_args(argv)
 
     runs = sorted({Path(p) for pat in args.treinos for p in glob.glob(pat) if Path(p).is_dir()})
@@ -127,16 +141,19 @@ def main(argv=None):
     for run in runs:
         model, _, ckpt = load_checkpoint(run / f"{args.modelo}.pt", device)
         model.eval()
-        base = student_predictions(model, images, device, None, args.limiar_score)
+        base = student_predictions(model, images, device, None, args.limiar_score,
+                                   args.tta, args.tta_votos)
         by_run[run.name] = base
-        stab = [f1_between(student_predictions(model, images, device, t, args.limiar_score), base)
-                for t in TRANSFORMS]
         row = {"metodo": run.name, "epoca": ckpt["epoca"],
-               "f1_x_professor": f1_between(base, teacher_labels),
-               "estabilidade": statistics.mean(stab)} | stats(base)
+               "f1_x_professor": f1_between(base, teacher_labels)} | stats(base)
+        if not args.tta:                                  # com TTA, é 1 por construção
+            row["estabilidade"] = statistics.mean(
+                f1_between(student_predictions(model, images, device, t, args.limiar_score), base)
+                for t in TRANSFORMS)
         rows.append(row)
         print(f"{run.name}: x professor {row['f1_x_professor']:.3f}, "
-              f"estabilidade {row['estabilidade']:.3f}, {row['copas_por_imagem']:.1f} copas/imagem")
+              f"estabilidade {row.get('estabilidade', float('nan')):.3f}, "
+              f"{row['copas_por_imagem']:.1f} copas/imagem")
 
     # O professor, para comparar.
     prof_cfg = Path(args.config_professor or ds.store.params_path)
@@ -154,7 +171,9 @@ def main(argv=None):
     def cell(v, spec):
         return format(v, spec) if isinstance(v, (int, float)) and v != "" else "—"
 
-    lines = [f"Diagnóstico sem referência em {args.split} ({len(idx)} imagens de {cfg['pasta']}).",
+    tta = ", aluno com TTA" if args.tta else ""
+    lines = [f"Diagnóstico sem referência em {args.split} ({len(idx)} imagens de "
+             f"{cfg['pasta']}{tta}).",
              "", "| Método | Época | F1 x professor | Estabilidade (rotação/espelho) | "
              "Copas por imagem | Área mediana (px) |", "|---|---|---|---|---|---|"]
     for r in rows:
@@ -167,8 +186,9 @@ def main(argv=None):
     out = Path(args.saida)
     out.mkdir(parents=True, exist_ok=True)
     md = "\n".join(lines) + "\n"
-    (out / f"sem_referencia_{args.split}.md").write_text(md, encoding="utf-8")
-    (out / f"sem_referencia_{args.split}.json").write_text(json.dumps(
+    tag = f"sem_referencia_{args.split}" + ("_tta" if args.tta else "")
+    (out / f"{tag}.md").write_text(md, encoding="utf-8")
+    (out / f"{tag}.json").write_text(json.dumps(
         {"imagens": idx, "metodos": rows, "pares_de_sementes": pairs},
         indent=2, ensure_ascii=False), encoding="utf-8")
     print(md)

@@ -128,6 +128,20 @@ intervalo de 95% e valor p) e o erro relativo de área nas copas que todos
 acertaram. Cada execução no teste fica anotada em `saidas/registro_teste.csv`.
 Com `--split val`, faz o mesmo na validação, sem anotar.
 
+**Previsão com as 8 orientações (TTA).** Qualquer modelo salvo pode prever
+cada imagem nas 4 rotações, com e sem espelho, e combinar as copas: o que
+aparece em pelo menos 4 das 8 orientações fica, o resto sai
+(`rsskd/tta.py`). Não precisa treinar de novo; é cerca de 8 vezes mais lento.
+
+```
+python scripts/evaluate_student.py --run runs/curto_l0_s0 --tta        # compara com a avaliação comum
+python scripts/final_test.py "Etapa 2=runs/e2_kd_s*" --split val --tta
+```
+
+`export_predictions.py` e `check_without_labels.py` também aceitam `--tta`; as
+saídas ganham o sufixo `_tta`. Usar ou não o TTA é uma escolha a fazer na
+validação, antes do teste.
+
 ### 5. Comparar com outros métodos (o SAM do Felipe)
 
 ```
@@ -235,6 +249,7 @@ cair; a regra 1 com a mediana não mudou o F1. No teste, o TEBAKA tem F1 0,52.
 | `rsskd/evaluation.py` | Métricas por copa e de área (incluindo o erro relativo nas copas em comum) |
 | `rsskd/stats.py` | Intervalos de confiança e comparação pareada por bootstrap |
 | `rsskd/predictions.py`, `rsskd/tiling.py` | Previsões em arquivo e ortomosaicos |
+| `rsskd/tta.py` | Previsão com as 8 orientações combinadas |
 | `rsskd/cerrado.py` | Leitura das fotos do Mavic 3M no formato do AgML |
 | `rsskd/paths.py` | Mensagens claras quando falta um arquivo |
 | `rsskd/model.py`, `rsskd/losses.py` | RS-SSKD original de classificação, mantido como referência |
