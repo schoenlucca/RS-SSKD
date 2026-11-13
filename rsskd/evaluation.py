@@ -226,10 +226,31 @@ def format_summary(s: dict) -> str:
 # Avaliação do aluno
 # --------------------------------------------------------------------------
 @torch.no_grad()
+def predict_crowns(model, image: torch.Tensor, device: str | torch.device = "cpu",
+                   score_thr: float = 0.5, mask_thr: float = 0.5, min_area: int = 0,
+                   tta: bool = False, tta_votes: int | None = None) -> np.ndarray:
+    """Copas do aluno numa imagem (C, H, W): etiquetas (H, W), 0 = fundo.
+
+    tta=True combina as previsões das 8 orientações (rsskd/tta.py); tta_votes
+    é o mínimo de orientações em que a copa precisa aparecer (padrão: 4).
+    O modelo deve estar em model.eval().
+    """
+    with torch.no_grad():
+        if tta:
+            from .tta import predict_tta
+
+            out = predict_tta(model, image.to(device), score_thr=score_thr,
+                              mask_thr=mask_thr, min_votes=tta_votes)
+        else:
+            (out,) = model([image.to(device)])
+    return predictions_to_instances(out, score_thr, mask_thr, min_area)
+
+
 def evaluate_student(model, dataset, device: str | torch.device = "cpu",
                      score_thr: float = 0.5, mask_thr: float = 0.5,
                      min_area: int = 0, batch_size: int = 4,
-                     teacher_metrics: CrownMetrics | None = None):
+                     teacher_metrics: CrownMetrics | None = None,
+                     tta: bool = False, tta_votes: int | None = None):
     """Roda o aluno em todas as imagens de `dataset` e mede contra a referência.
 
     dataset: um CrownDataset **sem** transformação (as imagens na orientação
@@ -241,6 +262,9 @@ def evaluate_student(model, dataset, device: str | torch.device = "cpu",
     mesma passada, com a comparação do aluno contra as copas do professor
     (TEBAKA) nessas imagens. Não usa nenhum rótulo humano: é o critério
     "sem rótulos" para escolher o melhor modelo (parte 5b).
+
+    tta: combina as 8 orientações em cada imagem (rsskd/tta.py); ~8 vezes
+    mais lento. Fora do treino, só na avaliação.
     """
     if getattr(dataset, "transform", None) is not None:
         raise ValueError("Avalie com um CrownDataset sem transform.")
@@ -248,10 +272,15 @@ def evaluate_student(model, dataset, device: str | torch.device = "cpu",
     model.eval()
     metrics = CrownMetrics()
     for images, targets in make_loader(dataset, batch_size=batch_size, shuffle=False):
-        outputs = model([im.to(device) for im in images])
-        for out, t in zip(outputs, targets):
+        if tta:
+            preds = [predict_crowns(model, im, device, score_thr, mask_thr, min_area,
+                                    True, tta_votes) for im in images]
+        else:
+            outputs = model([im.to(device) for im in images])
+            preds = [predictions_to_instances(o, score_thr, mask_thr, min_area)
+                     for o in outputs]
+        for pred, t in zip(preds, targets):
             i = int(t["image_id"])
-            pred = predictions_to_instances(out, score_thr, mask_thr, min_area)
             metrics.add(pred, dataset.reference(i), index=i)
             if teacher_metrics is not None:
                 teacher_metrics.add(pred, dataset.store.load(dataset.split, i), index=i)

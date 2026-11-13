@@ -4,6 +4,7 @@ Uso:
     python scripts/evaluate_student.py --run runs/lambda1
     python scripts/evaluate_student.py --run runs/lambda1 --modelo ultimo
     python scripts/evaluate_student.py --run runs/lambda1 --split test
+    python scripts/evaluate_student.py --run runs/lambda1 --tta   # 8 orientações combinadas
 
 Carrega o modelo salvo pelo scripts/train_student.py (melhor.pt ou
 ultimo.pt), roda nas imagens da divisão escolhida e mede, com as mesmas
@@ -14,6 +15,10 @@ métricas do professor:
 **O teste é para o fim.** Use a validação para comparar versões e escolher
 parâmetros; rode no teste só as versões finais, uma vez, para o relatório.
 Escolher qualquer coisa olhando o teste deixaria o número otimista.
+
+Com --tta, cada imagem é prevista nas 8 orientações e as copas são
+combinadas (rsskd/tta.py); as saídas ganham o sufixo _tta, para comparar
+com a previsão comum.
 
 Saídas em runs/<nome>/:
     avaliacao_<divisão>_<modelo>.json   resumo das métricas
@@ -38,7 +43,7 @@ import torch  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rsskd.dataset import CrownDataset  # noqa: E402
 from rsskd.evaluation import (  # noqa: E402
-    CrownMetrics, evaluate_student, format_summary, predictions_to_instances,
+    CrownMetrics, evaluate_student, format_summary, predict_crowns,
 )
 from rsskd.inputs import InputSpec  # noqa: E402
 from rsskd.train import load_checkpoint, pick_device  # noqa: E402
@@ -62,6 +67,10 @@ def main(argv=None):
                     help="confiança mínima para uma detecção virar copa")
     ap.add_argument("--dispositivo", default="auto")
     ap.add_argument("--n-figura", type=int, default=4)
+    ap.add_argument("--tta", action="store_true",
+                    help="combina as previsões das 8 orientações (rotações e espelho)")
+    ap.add_argument("--tta-votos", type=int, default=None,
+                    help="mínimo de orientações em que a copa aparece (padrão: 4)")
     args = ap.parse_args(argv)
 
     run_dir = Path(args.run)
@@ -73,15 +82,17 @@ def main(argv=None):
 
     vs_teacher = CrownMetrics()
     s_ref, m_ref = evaluate_student(model, ds, device, score_thr=args.limiar_score,
-                                    teacher_metrics=vs_teacher)
+                                    teacher_metrics=vs_teacher, tta=args.tta,
+                                    tta_votes=args.tta_votos)
     s_prof = vs_teacher.summary()
     print(f"Aluno x referência: {format_summary(s_ref)}")
     print(f"Aluno x professor:  {format_summary(s_prof)}")
 
-    tag = f"avaliacao_{args.split}_{args.modelo.replace('/', '_')}"
+    tag = f"avaliacao_{args.split}_{args.modelo.replace('/', '_')}" + ("_tta" if args.tta else "")
     (run_dir / f"{tag}.json").write_text(json.dumps(
         {"modelo": args.modelo, "epoca": ckpt["epoca"], "split": args.split,
-         "limiar_score": args.limiar_score, "aluno_x_referencia": s_ref,
+         "limiar_score": args.limiar_score, "tta": args.tta, "tta_votos": args.tta_votos,
+         "aluno_x_referencia": s_ref,
          "aluno_x_professor": s_prof}, indent=2, ensure_ascii=False), encoding="utf-8")
     import csv
     with open(run_dir / f"{tag}.csv", "w", newline="", encoding="utf-8") as f:
@@ -95,8 +106,8 @@ def main(argv=None):
     with torch.no_grad():
         for r, i in enumerate(idx.tolist()):
             image, _ = ds[i]
-            (out,) = model([image.to(device)])
-            pred = predictions_to_instances(out, args.limiar_score)
+            pred = predict_crowns(model, image, device, args.limiar_score,
+                                  tta=args.tta, tta_votes=args.tta_votos)
             teacher, ref = ds.store.load(args.split, i), ds.reference(i)
             panels = [(rgb_from_input(image, spec), f"imagem {i}"),
                       (colorize(teacher), f"professor: {teacher.max()} copas"),

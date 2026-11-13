@@ -25,7 +25,9 @@ E monta, em saidas/teste_final.md:
     1ª semente de cada método).
 
 **O teste é para o fim.** Rode-o uma vez, com as versões escolhidas pela
-validação. Cada execução no teste fica anotada em saidas/registro_teste.csv
+validação. Com --tta, as previsões do aluno combinam as 8 orientações
+(rsskd/tta.py) e as saídas ganham o sufixo _tta. Cada execução no teste fica
+anotada em saidas/registro_teste.csv
 (data e o que foi avaliado), para o relatório poder dizer, com honestidade,
 quantas vezes o teste foi olhado. --split val faz o mesmo na validação, sem
 anotar.
@@ -73,13 +75,13 @@ def parse_groups(items: list[str]) -> list[tuple[str, list[Path]]]:
 
 def predictions_for(run: Path, model: str, split: str, args) -> Path:
     """Pasta com as previsões do modelo na divisão; exporta se faltar."""
-    folder = Path(args.previsoes) / run.name
+    folder = Path(args.previsoes) / (run.name + ("_tta" if args.tta else ""))
     store = PredictionStore(folder)
     done = store.info().get("modelo") == model and split in store.info().get("imagens", {})
     if not done:
         export(["--run", str(run), "--modelo", model, "--divisoes", split,
                 "--saida", str(folder), "--dispositivo", args.dispositivo,
-                "--limiar-score", str(args.limiar_score)])
+                "--limiar-score", str(args.limiar_score)] + (["--tta"] if args.tta else []))
         info = json.loads((folder / "info.json").read_text(encoding="utf-8"))
         info["modelo"] = model
         (folder / "info.json").write_text(json.dumps(info, indent=2, ensure_ascii=False),
@@ -118,6 +120,8 @@ def main(argv=None):
     ap.add_argument("--bootstrap", type=int, default=10000)
     ap.add_argument("--limiar-score", type=float, default=0.5)
     ap.add_argument("--dispositivo", default="auto")
+    ap.add_argument("--tta", action="store_true",
+                    help="previsões do aluno com as 8 orientações combinadas (rsskd/tta.py)")
     args = ap.parse_args(argv)
 
     ds = AgmlTreeCrowns(args.pasta, split=args.split)
@@ -146,7 +150,8 @@ def main(argv=None):
 
     summaries = {n: [m.summary() for m in ms] for n, ms in methods.items()}
     head = ["Método", "n"] + [h for _, h, _ in METRICS]
-    lines = [f"Avaliação final em {args.split} ({len(ds)} imagens, modelo {args.modelo}.pt), "
+    tta = ", com TTA" if args.tta else ""
+    lines = [f"Avaliação final em {args.split} ({len(ds)} imagens, modelo {args.modelo}.pt{tta}), "
              "contra a referência do AgML. Média ± desvio entre sementes.", "",
              "| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for n, ss in summaries.items():
@@ -174,11 +179,11 @@ def main(argv=None):
 
     out = Path(args.saida)
     out.mkdir(parents=True, exist_ok=True)
-    tag = "teste_final" if args.split == "test" else "final_val"
+    tag = ("teste_final" if args.split == "test" else "final_val") + ("_tta" if args.tta else "")
     md = "\n".join(lines) + "\n"
     (out / f"{tag}.md").write_text(md, encoding="utf-8")
     (out / f"{tag}.json").write_text(json.dumps(
-        {"split": args.split, "modelo": args.modelo, "fontes": sources,
+        {"split": args.split, "modelo": args.modelo, "tta": args.tta, "fontes": sources,
          "resumos": summaries, "diferenca_f1_tebaka": comparisons, "area_comum": common},
         indent=2, ensure_ascii=False), encoding="utf-8")
     if args.split == "test":
@@ -188,7 +193,8 @@ def main(argv=None):
             w = csv.writer(f)
             if not before and not log.stat().st_size:
                 w.writerow(["data", "modelo", "metodos"])
-            w.writerow([datetime.now().isoformat(timespec="seconds"), args.modelo,
+            w.writerow([datetime.now().isoformat(timespec="seconds"),
+                        args.modelo + (" + TTA" if args.tta else ""),
                         "; ".join(f"{n}: {', '.join(s)}" for n, s in sources.items())])
         if before:
             print(f"Atenção: esta é a avaliação no teste nº {before + 1} "
