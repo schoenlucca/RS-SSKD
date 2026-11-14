@@ -28,3 +28,7 @@ saidas/
 
 # Previsões exportadas (scripts/export_predictions.py)
 previsoes/
+
+# Imagens geradas para rotular (o manifesto.json e os COCO podem ir para o git)
+rotulagem/*/imagens/
+rotulagem/imagens/

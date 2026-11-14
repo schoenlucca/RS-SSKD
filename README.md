@@ -203,6 +203,30 @@ python3 scripts/check_without_labels.py "runs/cerrado_l0_s*"
   as sementes. As máscaras de referência podem trazer um número por copa
   (PNG de 16 bits), e as copas encostadas continuam separadas na avaliação.
 
+### 8. Referência à mão no Cerrado
+
+Os rótulos à mão viram a divisão de teste do Cerrado. O protocolo (o que é
+copa, copas que se tocam, ferramenta) está em `docs/protocolo_rotulacao.md`.
+
+```
+python3 scripts/export_for_labeling.py --voos <voo do teste> --n 50          # rotulagem/imagens + manifesto.json
+# ... rotular no CVAT ou no Roboflow (polígonos) e exportar em COCO ...
+python3 scripts/compare_annotators.py rotulagem/lucca.json rotulagem/felipe.json --nomes Lucca Felipe
+python3 scripts/import_labels.py --coco rotulagem/rotulos.json --rotulador "Lucca e Felipe"
+python3 scripts/generate_pseudolabels.py --pasta data/cerrado --config configs/cerrado_teacher.json --saida data/pseudo/cerrado --divisoes test
+python3 scripts/final_test.py "Etapa 1=runs/cerrado_l0_s*" --pasta data/cerrado --copas data/pseudo/cerrado
+```
+
+- Os recortes de rotulação têm 512×512 pixels da foto original, para quem
+  rotula ver o detalhe. Na importação, os polígonos são reduzidos para 256×256,
+  e cada recorte rotulado cai exatamente sobre um recorte do modelo.
+- Os recortes saem de voos fora do treino e da validação, com disparos
+  espaçados (fotos seguidas se sobrepõem). Os dois scripts recusam voos do
+  treino.
+- A referência guarda um número por copa: copas encostadas continuam separadas.
+- `compare_annotators.py` mede a concordância entre duas pessoas nas mesmas
+  imagens, que é o teto realista do F1.
+
 ## O que sai em cada pasta
 
 Nenhuma dessas pastas vai para o git.
@@ -214,6 +238,7 @@ Nenhuma dessas pastas vai para o git.
 | `data/cerrado/`, `data/pseudo/cerrado/` | Recortes do Cerrado (`manifesto.json`) e as copas do professor neles |
 | `runs/<treino>/` | `config.json`, `historico.csv` (perdas e métricas por época), `melhor.pt` (pelo critério do treino), `ultimo.pt`, `epocas/epoca_NN.pt` (com `--salvar-epocas`), `avaliacao_*` |
 | `previsoes/<método>/` | Copas exportadas e `info.json` |
+| `rotulagem/` | Recortes para rotular (`imagens/`, fora do git), `manifesto.json` e os arquivos COCO (vale versionar estes dois) |
 | `saidas/` | Tabelas (`comparacao.md`, `previsoes_*.csv`), figuras e checagens |
 
 `melhor_referencia.pt` é o melhor modelo contra a referência e serve **só para
@@ -251,9 +276,11 @@ cair; a regra 1 com a mediana não mudou o F1. No teste, o TEBAKA tem F1 0,52.
 | `rsskd/predictions.py`, `rsskd/tiling.py` | Previsões em arquivo e ortomosaicos |
 | `rsskd/tta.py` | Previsão com as 8 orientações combinadas |
 | `rsskd/cerrado.py` | Leitura das fotos do Mavic 3M no formato do AgML |
+| `rsskd/labeling.py`, `rsskd/coco.py` | Recortes para rotular e importação dos polígonos (COCO) |
 | `rsskd/paths.py` | Mensagens claras quando falta um arquivo |
 | `rsskd/model.py`, `rsskd/losses.py` | RS-SSKD original de classificação, mantido como referência |
 | `scripts/` | Um script por passo acima |
+| `docs/protocolo_rotulacao.md` | Protocolo de rotulação das copas |
 | `configs/` | Parâmetros do professor e normalização da entrada (AgML e Cerrado) |
 | `tests/` | Testes (`pytest`) |
 
