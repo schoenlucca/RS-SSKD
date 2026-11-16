@@ -89,10 +89,17 @@ class CrownMetrics:
             m.add(pred, ref)            # imagens de etiquetas (H, W)
         m.summary()                     # {"precisao": ..., "f1": ..., ...}
         m.rows                          # uma linha por imagem (para CSV)
+
+    extra_thr: outros limiares de IoU em que o F1 também é medido (ex.:
+    (0.25, 0.75)). O resumo ganha "f1_iou25", "f1_iou75" etc. Com limiar
+    baixo, conta como acerto ter *encontrado* a copa; com limiar alto, só
+    contorná-la bem. Se o ganho de um método só aparece com limiar baixo, ele
+    encontra mais copas, mas não as contorna melhor.
     """
 
-    def __init__(self, iou_thr: float = 0.5):
+    def __init__(self, iou_thr: float = 0.5, extra_thr: tuple[float, ...] = ()):
         self.iou_thr = iou_thr
+        self.extra_thr = tuple(extra_thr)
         self.rows: list[dict] = []
         self.pred_areas: list[int] = []        # todas as copas previstas
         self.ref_areas: list[int] = []         # todas as copas da referência
@@ -123,6 +130,8 @@ class CrownMetrics:
             self.matched_by_ref[(key, int(r))] = (pa, ra)
         row["erro_area_medio"] = (float(np.mean([abs(a - b) for a, b in pairs]))
                                   if pairs else "")
+        for t in self.extra_thr:
+            row[f"tp_iou{round(t * 100)}"] = match_instances(pred, ref, t)["tp"]
         self.rows.append(row)
         return row
 
@@ -141,7 +150,19 @@ class CrownMetrics:
                          if self.rows else 0.0,
             "erro_contagem": float(np.mean([abs(r["n_pred"] - r["n_ref"])
                                             for r in self.rows])) if self.rows else 0.0,
-        } | self.area_summary()
+        } | self.threshold_summary() | self.area_summary()
+
+    def threshold_summary(self) -> dict:
+        """F1 nos limiares extras: os acertos mudam; as copas previstas e as
+        da referência, não."""
+        n_pred = sum(r["n_pred"] for r in self.rows)
+        n_ref = sum(r["n_ref"] for r in self.rows)
+        out = {}
+        for t in self.extra_thr:
+            key = f"iou{round(t * 100)}"
+            tp = sum(r[f"tp_{key}"] for r in self.rows)
+            out[f"f1_{key}"] = 2 * tp / (n_pred + n_ref) if n_pred + n_ref else 0.0
+        return out
 
     def area_summary(self) -> dict:
         """Métricas de área de Harmon et al. (2022): RMSE, MAE e KL."""

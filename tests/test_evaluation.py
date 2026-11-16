@@ -152,3 +152,20 @@ def test_erro_de_area_nas_copas_que_todos_acertaram():
     c = common_area_error({"A": ma, "B": mb})
     assert c["n_copas"] == 1
     assert c["A"] == pytest.approx(0.1) and c["B"] == pytest.approx(0.1)
+
+
+def test_f1_em_varios_limiares_de_iou():
+    # Uma copa encontrada mas mal contornada (IoU ~0,4): acerto com limiar
+    # 0,25, erro com 0,5 e 0,75. Outra bem contornada: acerto em todos.
+    ref = np.zeros((40, 40), np.int32)
+    ref[0:10, 0:10] = 1
+    ref[20:30, 20:30] = 2
+    pred = np.zeros((40, 40), np.int32)
+    pred[0:10, 0:4] = 1                                      # IoU 0,4
+    pred[20:30, 20:30] = 2                                   # IoU 1
+    m = CrownMetrics(extra_thr=(0.25, 0.75))
+    m.add(pred, ref, index=0)
+    s = m.summary()
+    assert s["f1"] == pytest.approx(0.5)
+    assert s["f1_iou25"] == pytest.approx(1.0) and s["f1_iou75"] == pytest.approx(0.5)
+    assert "f1_iou25" not in CrownMetrics().summary()        # padrão: só 0,5
