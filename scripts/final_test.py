@@ -27,7 +27,9 @@ E monta, em saidas/teste_final.md:
 **O teste é para o fim.** Rode-o uma vez, com as versões escolhidas pela
 validação. Com --tta, as previsões do aluno combinam as 8 orientações
 (rsskd/tta.py) e as saídas ganham o sufixo _tta. Cada execução no teste fica
-anotada em saidas/registro_teste.csv
+anotada em saidas/registro_teste.csv, com o --motivo (por exemplo, rodar de
+novo nas mesmas previsões só para ganhar colunas novas não é uma nova
+escolha de modelo, e o registro diz isso)
 (data e o que foi avaliado), para o relatório poder dizer, com honestidade,
 quantas vezes o teste foi olhado. --split val faz o mesmo na validação, sem
 anotar.
@@ -55,8 +57,11 @@ from rsskd.predictions import PredictionStore, check_against  # noqa: E402
 from rsskd.stats import COLUMNS, format_ci, paired_bootstrap  # noqa: E402
 
 METRICS = [("precisao", "P", ".2f"), ("revocacao", "R", ".2f"), ("f1", "F1", ".3f"),
+           ("f1_iou25", "F1 (IoU 0,25)", ".3f"), ("f1_iou75", "F1 (IoU 0,75)", ".3f"),
+           ("iou_copa", "IoU copa", ".2f"), ("iou_pixel", "IoU pixel", ".2f"),
            ("erro_contagem", "Erro contagem", ".1f"), ("area_erro_rel", "Erro rel. área", ".2f"),
            ("area_kl", "KL área", ".2f")]
+EXTRA_THR = (0.25, 0.75)
 
 
 def parse_groups(items: list[str]) -> list[tuple[str, list[Path]]]:
@@ -99,6 +104,22 @@ def pooled_rows(metrics: list[CrownMetrics]) -> list[dict]:
     return out
 
 
+REGISTRY_HEADER = ["data", "modelo", "metodos", "motivo"]
+
+
+def append_registry(log: Path, row: list[str]) -> int:
+    """Acrescenta uma execução ao registro do teste e devolve quantas havia
+    antes. Um registro antigo, sem a coluna motivo, ganha a coluna vazia."""
+    old = list(csv.reader(open(log, encoding="utf-8"))) if log.exists() else []
+    old_rows = [r + [""] * (len(REGISTRY_HEADER) - len(r)) for r in old[1:]]
+    with open(log, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(REGISTRY_HEADER)
+        w.writerows(old_rows)
+        w.writerow(row)
+    return len(old_rows)
+
+
 def mean_sd(values: list[float], spec: str) -> str:
     m = format(statistics.mean(values), spec)
     if len(values) < 2:
@@ -120,6 +141,9 @@ def main(argv=None):
     ap.add_argument("--bootstrap", type=int, default=10000)
     ap.add_argument("--limiar-score", type=float, default=0.5)
     ap.add_argument("--dispositivo", default="auto")
+    ap.add_argument("--motivo", default="",
+                    help="por que o teste está sendo rodado (vai para o registro), ex.: "
+                         "'mesmas previsões, colunas novas'")
     ap.add_argument("--tta", action="store_true",
                     help="previsões do aluno com as 8 orientações combinadas (rsskd/tta.py)")
     args = ap.parse_args(argv)
@@ -145,7 +169,7 @@ def main(argv=None):
             problems = check_against(store, args.split, ds)
             if problems:
                 raise SystemExit(f"{folder}: " + "; ".join(problems))
-            methods[name].append(evaluate_folder(store, args.split, refs))
+            methods[name].append(evaluate_folder(store, args.split, refs, EXTRA_THR))
             sources[name].append(str(folder))
 
     summaries = {n: [m.summary() for m in ms] for n, ms in methods.items()}
@@ -188,14 +212,10 @@ def main(argv=None):
         indent=2, ensure_ascii=False), encoding="utf-8")
     if args.split == "test":
         log = out / "registro_teste.csv"
-        before = sum(1 for _ in open(log, encoding="utf-8")) - 1 if log.exists() else 0
-        with open(log, "a", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            if not before and not log.stat().st_size:
-                w.writerow(["data", "modelo", "metodos"])
-            w.writerow([datetime.now().isoformat(timespec="seconds"),
-                        args.modelo + (" + TTA" if args.tta else ""),
-                        "; ".join(f"{n}: {', '.join(s)}" for n, s in sources.items())])
+        before = append_registry(log, [
+            datetime.now().isoformat(timespec="seconds"),
+            args.modelo + (" + TTA" if args.tta else ""),
+            "; ".join(f"{n}: {', '.join(s)}" for n, s in sources.items()), args.motivo])
         if before:
             print(f"Atenção: esta é a avaliação no teste nº {before + 1} "
                   f"(veja {log}).")

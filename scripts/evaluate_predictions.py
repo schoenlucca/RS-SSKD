@@ -50,15 +50,17 @@ from rsskd.predictions import PredictionStore, check_against  # noqa: E402
 from rsskd.stats import bootstrap_ci, format_ci, paired_bootstrap  # noqa: E402
 
 COLS = [("precisao", "P", ".2f"), ("revocacao", "R", ".2f"), ("f1", "F1", ".2f"),
+        ("f1_iou25", "F1 (IoU 0,25)", ".2f"), ("f1_iou75", "F1 (IoU 0,75)", ".2f"),
         ("iou_copa", "IoU copa", ".2f"), ("iou_pixel", "IoU pixel", ".2f"),
         ("erro_contagem", "Erro contagem", ".1f"), ("area_mae", "MAE área (px)", ".0f"),
         ("area_erro_rel", "Erro rel. área", ".2f"), ("area_kl", "KL área", ".2f")]
 
 
-def evaluate_folder(store, split, refs) -> CrownMetrics:
+def evaluate_folder(store, split, refs, extra_thr=(0.25, 0.75)) -> CrownMetrics:
     """Mede uma pasta contra as copas da referência; devolve o CrownMetrics
-    (o resumo sai de .summary(), as contagens por imagem de .rows)."""
-    m = CrownMetrics()
+    (o resumo sai de .summary(), as contagens por imagem de .rows). O F1 é
+    medido também nos limiares de IoU extra_thr."""
+    m = CrownMetrics(extra_thr=extra_thr)
     for i, ref in enumerate(refs):
         m.add(store.load(split, i), ref, index=i)
     return m
