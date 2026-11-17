@@ -87,3 +87,17 @@ def test_imagem_sem_copas():
         aluno([torch.randn(6, S, S)], [vazio])
     total, partes = distillation_loss(cap, professor)
     assert torch.isfinite(total) and partes["kd_mask"] == 0   # nenhuma região positiva
+
+
+def test_kd_mascaras_nao_usa_bce_comum(monkeypatch):
+    """Com --amp, o torch recusa F.binary_cross_entropy dentro do autocast
+    (o erro do servidor). A KL das máscaras tem de usar só a versão with_logits."""
+    import torch.nn.functional as F
+
+    def recusa(*a, **k):
+        raise RuntimeError("binary_cross_entropy is unsafe to autocast")
+
+    monkeypatch.setattr(F, "binary_cross_entropy", recusa)
+    m = torch.randn(3, 2, 28, 28)
+    assert kd_masks(m.half(), (m + 1).half(), 4.0).dtype == torch.float32
+    assert kd_masks(m, m, 4.0).item() == pytest.approx(0, abs=1e-5)

@@ -134,14 +134,19 @@ def kd_masks(student_logits, teacher_logits, temperature: float) -> torch.Tensor
         BCE(aluno, alvo = p_professor) - entropia(p_professor),
     que vale zero quando as duas probabilidades coincidem. Usa o canal da
     classe "copa" (1), o mesmo que a perda de máscaras do torchvision usa.
+
+    As duas partes usam a versão "with_logits", em float32: com --amp
+    (autocast), o binary_cross_entropy comum é recusado pelo torch, por ser
+    instável em float16.
     """
     if student_logits.numel() == 0:
         return student_logits.sum() * 0.0
     T = temperature
-    s = student_logits[:, 1] / T
-    p_t = torch.sigmoid(teacher_logits[:, 1] / T)
+    s = student_logits[:, 1].float() / T
+    t = teacher_logits[:, 1].float() / T
+    p_t = torch.sigmoid(t)
     bce = F.binary_cross_entropy_with_logits(s, p_t)
-    entropy = F.binary_cross_entropy(p_t, p_t)        # constante para o aluno
+    entropy = F.binary_cross_entropy_with_logits(t, p_t)   # constante para o aluno
     return (bce - entropy) * T * T
 
 
