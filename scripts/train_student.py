@@ -257,7 +257,8 @@ def main(argv=None):
         model.load_state_dict(ckpt["modelo"])
         opt.load_state_dict(ckpt["otimizador"])
         start_epoch, step = ckpt["epoca"] + 1, ckpt["passo"]
-        torch.set_rng_state(ckpt["rng"])
+        # map_location=cuda leva o estado do sorteio para a GPU; ele tem de ficar na CPU.
+        torch.set_rng_state(ckpt["rng"].cpu())
         best_score, best_epoch = ckpt.get("melhor_score", -1.0), ckpt.get("melhor_epoca", -1)
         best_ref = ckpt.get("melhor_ref_score", -1.0)
         print(f"Retomando de {ckpt_path}, época {start_epoch}")
